@@ -1,7 +1,7 @@
 import uuid
 import aiofiles
 from fastapi import UploadFile
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import os
 import PyPDF2
 import docx
@@ -607,16 +607,27 @@ class BookStructureDetector:
                 if chapter_subtitle:
                     chapter_title = f"Chapter {chapter_display_number}: {chapter_subtitle}"
                 else:
-                    # No subtitle, look for title in next few lines
+                    # KAN-440: the heading line alone matched a chapter pattern
+                    # with a number, so the following line is either a real
+                    # short title (Last-President shape: "CHAPTER I" then "The
+                    # Reign of Confusion") or running narrative prose (orwell
+                    # shape: "Chapter 4" then "Winston looked round the shabby
+                    # little room above Mr", 52 chars that slipped past the
+                    # semantic filter). The FIRST heading-like line after the
+                    # bare numbered heading decides the subtitle, and it is
+                    # appended only when it is short — never append prose.
                     title_found = None
                     for i in range(line_num + 1, min(line_num + 5, len(lines))):
                         next_line = lines[i].strip()
                         if not next_line:
                             continue
-                        if self._is_semantic_heading_candidate(next_line):
-                            if not self._match_chapter_patterns(next_line):
-                                title_found = next_line
-                                break
+                        if not self._is_semantic_heading_candidate(next_line):
+                            continue
+                        if self._match_chapter_patterns(next_line):
+                            break
+                        if len(next_line) <= 48 and len(next_line.split()) <= 8:
+                            title_found = next_line
+                        break
 
                     if title_found:
                         chapter_title = f"Chapter {chapter_display_number}: {title_found}"
@@ -1397,12 +1408,25 @@ class BookStructureDetector:
                         f"{LogSanitizer.redact(chapter_title, label='title')}"
                     )
 
-        # KAN-367 v3: Renumber only chapters sequentially from 1
+        # KAN-227: keep heading-derived chapter numbers (II/V/IX stay 2/5/9);
+        # use extraction order ONLY as a fallback for chapters whose headings
+        # carry no usable number, and never emit duplicates (1,1,1).
         chapter_seq = 0
+        seen_chapter_numbers = set()
         for item in all_items:
             if item.get("content_type") == "chapter":
                 chapter_seq += 1
-                item["number"] = str(chapter_seq)
+                detected = str(item.get("number") or "").strip()
+                if detected.isdigit() and detected not in seen_chapter_numbers:
+                    item["number"] = detected
+                else:
+                    # No reliable heading number (or it collided) — assign the
+                    # sequence position, skipping values already taken.
+                    next_num = chapter_seq
+                    while str(next_num) in seen_chapter_numbers:
+                        next_num += 1
+                    item["number"] = str(next_num)
+                seen_chapter_numbers.add(item["number"])
             self._with_generation_flag(item)
 
         print(
@@ -2445,7 +2469,92 @@ class FileService:
         normalized["number"] = number
         return normalized
 
-    def _reconstruct_epub_chapters_from_text(self, full_text: str) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _normalized_text_size(text: str) -> int:
+        """Count meaningful text characters for aggregate coverage checks."""
+        return len(re.sub(r"\s+", "", text or ""))
+
+    def _aggregate_reconstruction_represents_document(
+        self,
+        reconstructed: List[Dict[str, Any]],
+        full_text: str,
+        fragment_count: int,
+    ) -> bool:
+        """Return True when aggregate output covers a page-fragment EPUB.
+
+        KAN-445: real EPUB page exports can arrive as hundreds of type-0 XHTML
+        spine fragments with no reliable per-fragment chapter title. The
+        aggregate detector may still return one large item that contains the
+        document, but the numbered-chapter semantic gate used to reject it
+        because it had zero Chapter-N-style titles.
+        """
+        if fragment_count < 3 or not reconstructed:
+            return False
+
+        full_size = self._normalized_text_size(full_text)
+        if full_size < 1000:
+            return False
+
+        recovered_size = self._normalized_text_size(
+            "\n".join(str(item.get("content") or "") for item in reconstructed)
+        )
+        if recovered_size < 100:
+            return False
+
+        coverage = recovered_size / max(full_size, 1)
+        if coverage < 0.70:
+            print(
+                "[EPUB] Aggregate reconstruction rejected: "
+                f"coverage {coverage:.2%} across {fragment_count} fragments"
+            )
+            return False
+
+        print(
+            "[EPUB] Aggregate reconstruction covers document "
+            f"({coverage:.2%} across {fragment_count} fragments)"
+        )
+        return True
+
+    def _accept_representative_epub_reconstruction(
+        self, reconstructed: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Ensure representative aggregate output has at least one chapter item."""
+        accepted = [dict(item) for item in reconstructed]
+        chapter_items = [
+            item for item in accepted if item.get("content_type") == "chapter"
+        ]
+
+        if not chapter_items:
+            contentful = [
+                item
+                for item in accepted
+                if len((item.get("content") or "").strip()) >= 100
+            ]
+            if contentful:
+                representative = max(
+                    contentful,
+                    key=lambda item: len((item.get("content") or "").strip()),
+                )
+                representative["content_type"] = "chapter"
+                representative["type"] = "chapter"
+                representative["number"] = "1"
+                if not (representative.get("title") or "").strip():
+                    representative["title"] = "Complete Text"
+
+        chapter_number = 0
+        for item in accepted:
+            if item.get("content_type") == "chapter":
+                chapter_number += 1
+                item["number"] = str(chapter_number)
+            else:
+                item["number"] = None
+            self._with_generation_flag(item)
+
+        return accepted
+
+    def _reconstruct_epub_chapters_from_text(
+        self, full_text: str, fragment_count: int = 0
+    ) -> List[Dict[str, Any]]:
         """Reconstruct chapters from aggregate page-split EPUB spine text."""
         if not full_text or not full_text.strip():
             return []
@@ -2469,9 +2578,21 @@ class FileService:
                 "[EPUB] Aggregate reconstruction failed semantic chapter gate "
                 f"({len(semantic_chapters)} chapter-like items)"
             )
-            reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
-            if not reconstructed:
+            explicit_reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
+            if explicit_reconstructed:
+                reconstructed = explicit_reconstructed
+            elif self._aggregate_reconstruction_represents_document(
+                reconstructed, full_text, fragment_count
+            ):
+                reconstructed = self._accept_representative_epub_reconstruction(
+                    reconstructed
+                )
+            else:
                 return []
+
+        semantic_chapters = [
+            ch for ch in reconstructed if ch.get("content_type") == "chapter"
+        ]
 
         print(
             "[EPUB] Aggregate reconstruction produced "
@@ -2496,41 +2617,154 @@ class FileService:
         lines = full_text.splitlines()
         candidates: List[Dict[str, Any]] = []
 
-        for line_num, raw_line in enumerate(lines):
-            line = re.sub(r"\s+", " ", raw_line).strip()
-            if not re.match(r"(?i)^chap(?:ter|\.)\s+", line):
-                continue
+        def clean_line(raw: str) -> str:
+            return re.sub(r"\s+", " ", raw or "").strip()
 
-            match = self.structure_detector._match_chapter_patterns(line)
-            if not match:
-                continue
+        def compact_letter_spaced_words(text: str) -> str:
+            """Normalize OCR/scan headings like C H A P T E R."""
+            compacted = re.sub(
+                r"\b(?:[A-Za-z]\s+){2,}[A-Za-z]\b",
+                lambda match: re.sub(r"\s+", "", match.group(0)),
+                text,
+            )
+            # C H A P T E R I. compacts to CHAPTERI.; restore the boundary so
+            # the normal chapter parser can read the numeral.
+            return re.sub(
+                r"(?i)^(chap(?:ter|\.))([ivxlcdm]+|\d+)([\s\.:\-\u2013\u2014]|$)",
+                r"\1 \2\3",
+                compacted,
+            )
 
-            normalized = str(match.get("number", ""))
-            if not normalized.isdigit():
-                continue
-            number = int(normalized)
-            if number < 1 or number > 500:
-                continue
+        def normalized_heading_forms(raw: str) -> List[str]:
+            line = clean_line(raw)
+            compacted = compact_letter_spaced_words(line)
+            forms = [line]
+            if compacted != line:
+                forms.append(compacted)
+            return forms
 
-            subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip()
-            if not subtitle:
-                # Subtitle lookahead: a bare heading ("CHAPTER I.") is followed
-                # by its title on the next non-empty line.
-                for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
-                    next_line = re.sub(r"\s+", " ", lines[lookahead]).strip()
-                    if not next_line:
-                        continue
-                    if self.structure_detector._match_chapter_patterns(next_line):
-                        break
-                    if self.structure_detector._match_special_sections(next_line):
-                        break
-                    if self._is_semantic_heading_candidate(next_line):
-                        subtitle = next_line
+        def numeric_value(raw_number: str) -> Optional[int]:
+            raw = clean_line(str(raw_number)).strip(".:- ")
+            if raw.isdigit():
+                value = int(raw)
+            elif re.fullmatch(r"(?i)[ivxlcdm]+", raw):
+                value = self.structure_detector._roman_to_int(raw.upper())
+            else:
+                return None
+            if 1 <= value <= 500:
+                return value
+            return None
+
+        def subtitle_after(line_num: int) -> str:
+            # Subtitle lookahead: a bare heading (CHAPTER I. or split CHAPTER/I.)
+            # may be followed by its title on the next non-empty line.
+            for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
+                next_line = clean_line(lines[lookahead])
+                if not next_line:
+                    continue
+                next_forms = normalized_heading_forms(next_line)
+                if any(
+                    self.structure_detector._match_chapter_patterns(form)
+                    for form in next_forms
+                ):
                     break
+                if any(
+                    self.structure_detector._match_special_sections(form)
+                    for form in next_forms
+                ):
+                    break
+                if self._is_semantic_heading_candidate(next_line):
+                    return next_line
+                break
+            return ""
+
+        def make_candidate(
+            line_num: int,
+            number: int,
+            subtitle: str = "",
+            mode: str = "chapter",
+        ) -> Dict[str, Any]:
             title = f"Chapter {number}"
+            subtitle = clean_line(subtitle)
             if subtitle and not self._is_narrative_prose_title(subtitle):
                 title = f"{title}: {subtitle}"
-            candidates.append({"line": line_num, "number": number, "title": title})
+            return {"line": line_num, "number": number, "title": title, "mode": mode}
+
+        def add_candidate(candidate: Dict[str, Any]) -> None:
+            if not any(
+                existing["line"] == candidate["line"]
+                and existing["number"] == candidate["number"]
+                for existing in candidates
+            ):
+                candidates.append(candidate)
+
+        def parse_chapter_line(line_num: int, raw_line: str) -> Optional[Dict[str, Any]]:
+            for form in normalized_heading_forms(raw_line):
+                if not re.match(r"(?i)^chap(?:ter|\.)\s+", form):
+                    continue
+                match = self.structure_detector._match_chapter_patterns(form)
+                if not match:
+                    continue
+                number = numeric_value(str(match.get("number", "")))
+                if number is None:
+                    continue
+                subtitle = clean_line(match.get("title", "") or "") or subtitle_after(line_num)
+                return make_candidate(line_num, number, subtitle, "chapter")
+            return None
+
+        def parse_split_number_line(raw_line: str) -> Optional[tuple[int, str]]:
+            line = clean_line(raw_line)
+            for form in normalized_heading_forms(line):
+                match = re.match(
+                    r"^([IVXLCDMivxlcdm]+|\d{1,3})\.?\s*(?:[\-:\u2013\u2014]\s*)?(.*)$",
+                    form,
+                )
+                if not match:
+                    continue
+                number = numeric_value(match.group(1))
+                if number is None:
+                    continue
+                subtitle = clean_line(match.group(2) or "")
+                return number, subtitle
+            return None
+
+        for line_num, raw_line in enumerate(lines):
+            line = clean_line(raw_line)
+            if not line:
+                continue
+
+            chapter_candidate = parse_chapter_line(line_num, line)
+            if chapter_candidate:
+                add_candidate(chapter_candidate)
+                continue
+
+            if any(
+                re.match(r"(?i)^chap(?:ter|\.)\.?$", form)
+                for form in normalized_heading_forms(line)
+            ):
+                for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
+                    next_line = clean_line(lines[lookahead])
+                    if not next_line:
+                        continue
+                    parsed = parse_split_number_line(next_line)
+                    if not parsed:
+                        break
+                    number, subtitle = parsed
+                    if not subtitle:
+                        subtitle = subtitle_after(lookahead)
+                    add_candidate(
+                        make_candidate(line_num, number, subtitle, "split_chapter")
+                    )
+                    break
+                continue
+
+            # Some scan/OCR EPUB exports render body headings as standalone Roman
+            # numerals after a compact TOC. Admit them only into the sequence scorer;
+            # page-number and TOC-like runs lose because their bodies are too short.
+            if re.fullmatch(r"[IVXLCDMivxlcdm]{1,12}\.?", line):
+                number = numeric_value(line)
+                if number is not None:
+                    add_candidate(make_candidate(line_num, number, "", "bare_roman"))
 
         sequences: List[List[Dict[str, Any]]] = []
         for start_index, candidate in enumerate(candidates):
@@ -2548,29 +2782,41 @@ class FileService:
         if not sequences:
             return []
 
-        def sequence_score(sequence: List[Dict[str, Any]]) -> tuple[int, int]:
-            # Internal chapter gaps distinguish a real body from a compact TOC.
-            internal_chars = sum(
-                sum(len(line) for line in lines[current["line"] : following["line"]])
-                for current, following in zip(sequence, sequence[1:])
-            )
-            return len(sequence), internal_chars
+        def back_matter_boundary(sequence: List[Dict[str, Any]]) -> tuple[int, str]:
+            last_line = sequence[-1]["line"]
+            for line_num in range(last_line + 1, len(lines)):
+                title = clean_line(lines[line_num])
+                if not title or len(title) > 160:
+                    continue
+                content_type = self._classify_spine_item(title, "", 0)
+                if content_type in {"back_matter", "metadata"}:
+                    return line_num, title
+            return len(lines), "Back Matter"
+
+        def sequence_score(sequence: List[Dict[str, Any]]) -> tuple[int, int, int]:
+            # Recovered body count and internal chapter gaps distinguish a real
+            # body sequence from a compact TOC. The c16691 Mac trace selected a
+            # one-chapter TOC artifact; score by recoverable chapters first.
+            back_matter_line, _ = back_matter_boundary(sequence)
+            recovered_count = 0
+            internal_chars = 0
+            for index, current in enumerate(sequence):
+                end_line = (
+                    sequence[index + 1]["line"]
+                    if index + 1 < len(sequence)
+                    else back_matter_line
+                )
+                content_length = sum(len(line) for line in lines[current["line"] : end_line])
+                if index + 1 < len(sequence):
+                    internal_chars += content_length
+                if content_length >= 100:
+                    recovered_count += 1
+            return recovered_count, len(sequence), internal_chars
 
         sequence = max(sequences, key=sequence_score)
         first_line = sequence[0]["line"]
-        last_line = sequence[-1]["line"]
 
-        back_matter_line = len(lines)
-        back_matter_title = "Back Matter"
-        for line_num in range(last_line + 1, len(lines)):
-            title = re.sub(r"\s+", " ", lines[line_num]).strip()
-            if not title or len(title) > 160:
-                continue
-            content_type = self._classify_spine_item(title, "", 0)
-            if content_type in {"back_matter", "metadata"}:
-                back_matter_line = line_num
-                back_matter_title = title
-                break
+        back_matter_line, back_matter_title = back_matter_boundary(sequence)
 
         recovered: List[Dict[str, Any]] = []
         front_content = "\n".join(lines[:first_line]).strip()
@@ -2929,7 +3175,41 @@ class FileService:
             return True
         return False
 
-    def _classify_spine_item(self, title: str, item_href: str, word_count: int) -> str:
+    def _is_structural_chapter_heading(self, title: str) -> bool:
+        """KAN-227: explicit chapter-pattern headings are structure, not prose.
+
+        Classic Gutenberg headings like ``Chapter IX.`` / ``CHAPTER 3`` end in
+        a period or carry no subtitle, which the narrative-prose filter treats
+        as body text. A heading element whose text matches an explicit chapter
+        pattern is a structural chapter boundary and must never be filtered.
+        """
+        t = re.sub(r"\s+", " ", (title or "").strip())
+        if not t:
+            return False
+        if self._is_chapter_like(t):
+            return True
+        match = self.structure_detector._match_chapter_patterns(t)
+        return bool(match and str(match.get("number", "")).strip())
+
+    def _derive_chapter_number_from_title(self, title: str) -> Optional[str]:
+        """KAN-227/KAN-226: pull the chapter number out of a heading title.
+
+        Returns the digit string carried by the heading ("CHAPTER 9" -> "9")
+        or None when the heading has no parseable number. Shared by the
+        bundled-sub-chapter and single-item spine paths so duplicate-number
+        fragments are visible as duplicates BEFORE any renumbering.
+        """
+        m = self.structure_detector._match_chapter_patterns(title or "")
+        if m:
+            _norm = str(m.get("number", ""))
+            if _norm.isdigit():
+                return _norm
+        return None
+
+    def _classify_spine_item(
+        self, title: str, item_href: str, word_count: int,
+        content: Optional[str] = None,
+    ) -> str:
         """KAN-367 v3: Classify a spine item as front_matter, back_matter, metadata, or chapter.
 
         Returns one of: 'chapter', 'front_matter', 'back_matter', 'metadata'.
@@ -2949,6 +3229,10 @@ class FileService:
 
         METADATA_HREFS = {
             "uncopyright.xhtml", "titlepage.xhtml", "halftitlepage.xhtml",
+            # KAN-226: copyright.xhtml was lost when the KAN-131-era
+            # UNCONDITIONAL_HREF list was ported into the classifier — the
+            # copyright/publisher page leaked through as a "chapter".
+            "copyright.xhtml",
         }
         href_basename = href_lower.rsplit("/", 1)[-1] if href_lower else ""
         if href_basename in METADATA_HREFS:
@@ -2995,7 +3279,29 @@ class FileService:
             if re.search(pat, title_lower):
                 return "metadata"
 
+        # KAN-226: publisher/copyright pages whose visible title is the
+        # publisher block or book title (no keyword match) still carry the
+        # legal boilerplate in their body text.
+        if content and self._looks_like_copyright_page(content, word_count):
+            return "metadata"
+
         return "chapter"
+
+    @staticmethod
+    def _looks_like_copyright_page(content: str, word_count: int) -> bool:
+        """KAN-226: detect a copyright/imprint page by its legal boilerplate.
+
+        Short pages (<300 words) containing at least two distinct copyright
+        markers (©, "copyright", "all rights reserved", ISBN) are publisher
+        imprint pages, not chapters. Real narrative chapters are far longer
+        and essentially never combine two markers inside 300 words.
+        """
+        lower = (content or "").lower()
+        if not lower or word_count >= 300:
+            return False
+        markers = ("\u00a9", "copyright", "all rights reserved", "isbn")
+        hits = sum(1 for marker in markers if marker in lower)
+        return hits >= 2
 
     def _filter_front_back_matter_structural(
         self, chapters: List[Dict[str, Any]]
@@ -3041,6 +3347,12 @@ class FileService:
 
         # --- Step 2: Classify all items (PRESERVE, don't drop) ---
         chapter_count = 0
+        seen_chapter_numbers = set()
+        # KAN-226: a run of chapters whose detected numbers already ascend from
+        # 1 (1,2,3…) is a fresh extraction — sequential numbering is correct.
+        # Off-run entries (sparse real numbers like CHAPTER 9, or a detected
+        # duplicate) keep their heading-derived number so it never drifts.
+        expected_seq = 1
         front_count = 0
         back_count = 0
         meta_count = 0
@@ -3048,8 +3360,18 @@ class FileService:
         for i, ch in enumerate(chapters):
             title = ch.get("title", "")
 
-            # Use the classifier for known front/back/metadata titles
-            classified_type = self._classify_spine_item(title, "", len(ch.get("content", "").split()))
+            # KAN-226: extraction-time classification (href + copyright-page
+            # content markers) is authoritative — spine items already marked
+            # front/back matter or metadata must not be re-classified as
+            # chapters just because their title carries no keyword.
+            existing_type = ch.get("content_type")
+            if existing_type in ("front_matter", "back_matter", "metadata"):
+                classified_type = existing_type
+            else:
+                # Use the classifier for known front/back/metadata titles
+                classified_type = self._classify_spine_item(
+                    title, "", len(ch.get("content", "").split())
+                )
 
             if classified_type != "chapter":
                 ch["content_type"] = classified_type
@@ -3091,7 +3413,23 @@ class FileService:
                 ch["content_type"] = "chapter"
                 self._with_generation_flag(ch)
                 chapter_count += 1
-                ch["number"] = str(chapter_count)
+                detected = str(ch.get("number") or "").strip()
+                if (
+                    detected == str(expected_seq)
+                    and detected not in seen_chapter_numbers
+                ):
+                    ch["number"] = detected
+                    expected_seq += 1
+                elif detected.isdigit() and detected not in seen_chapter_numbers and int(detected) > expected_seq - 1:
+                    # Genuine out-of-sequence heading number (e.g. CHAPTER 9
+                    # after the 1-run broke): keep it verbatim.
+                    ch["number"] = detected
+                else:
+                    next_num = expected_seq
+                    while str(next_num) in seen_chapter_numbers:
+                        next_num += 1
+                    ch["number"] = str(next_num)
+                seen_chapter_numbers.add(ch["number"])
 
         print(
             f"[EPUB-STRUCTURAL] Classified: {len(chapters)} total items — "
@@ -3100,6 +3438,99 @@ class FileService:
         )
 
         return chapters
+
+    def _dedupe_chapters_by_number(
+        self, chapters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """KAN-226: Collapse duplicate-number fragments into the real chapter.
+
+        Poorly-OCR'd scans / mislabelled EPUB sections can spawn several
+        short, low-value "chapter" fragments that all resolve to the same
+        numeral once normalized (e.g. three entries all reading "Chapter 1").
+        Run this BEFORE any downstream renumbering, while each entry still
+        carries the raw chapter number the extraction strategy detected.
+
+        Dominance rule (KAN-226 vs KAN-227 reconciliation): a duplicate is a
+        droppable fragment only when the longest body for that number is at
+        least 2x its size — i.e. a clearly dominant real chapter exists.
+        Comparable-size duplicates are real chapters whose heading numbers
+        collided (OCR noise); those are KEPT so downstream renumbering can
+        assign them unique numbers (KAN-227 semantics). Front/back matter and
+        entries without a parseable number pass through untouched.
+
+        KAN-440: the dominance comparison is scoped to INTRA-section
+        duplicates — keyed by (section_title, section_number, number). Books
+        whose numbering restarts per PART/BOOK legitimately repeat numbers
+        across sections, so bodies must never be compared across that
+        boundary. Section-less/flat lists all share the empty section key
+        and keep the KAN-226 behavior byte-for-byte.
+        """
+        DOMINANCE_RATIO = 2
+
+        if not chapters or len(chapters) < 2:
+            return chapters
+
+        indices_by_number: Dict[Tuple[str, str, str], List[int]] = {}
+        for idx, ch in enumerate(chapters):
+            content_type = ch.get("content_type") or "chapter"
+            raw_number = ch.get("number")
+            if content_type != "chapter" or raw_number in (None, ""):
+                continue
+            normalized = str(
+                self.structure_detector._normalize_chapter_number(str(raw_number))
+            )
+            if not normalized.isdigit():
+                continue
+            section_key = (
+                str(ch.get("section_title") or ""),
+                str(ch.get("section_number") or ""),
+                normalized,
+            )
+            indices_by_number.setdefault(section_key, []).append(idx)
+
+        drop = set()
+        duplicates_dropped = 0
+        for (_sec_title, _sec_num, normalized), idxs in indices_by_number.items():
+            if len(idxs) < 2:
+                continue
+            lengths = {
+                i: len(chapters[i].get("content", "").strip()) for i in idxs
+            }
+            max_len = max(lengths.values())
+            for i in idxs:
+                if lengths[i] < max_len and lengths[i] * DOMINANCE_RATIO <= max_len:
+                    drop.add(i)
+                    duplicates_dropped += 1
+                    print(
+                        f"[DEDUPE] Chapter {normalized}: dropping fragment "
+                        f"'{LogSanitizer.redact(chapters[i].get('title', ''), label='title')}' "
+                        f"({lengths[i]} chars) — dominant body is {max_len} chars"
+                    )
+                elif lengths[i] < max_len:
+                    print(
+                        f"[DEDUPE] Chapter {normalized}: keeping comparable duplicate "
+                        f"'{LogSanitizer.redact(chapters[i].get('title', ''), label='title')}' "
+                        f"({lengths[i]} chars vs {max_len}) — OCR-number collision, "
+                        "renumbering must disambiguate"
+                    )
+
+        if duplicates_dropped:
+            print(f"[DEDUPE] Removed {duplicates_dropped} duplicate chapter-number entries")
+
+        return [ch for i, ch in enumerate(chapters) if i not in drop]
+
+    @staticmethod
+    def _next_content_sibling(node: Any) -> Any:
+        """Next sibling skipping whitespace-only text nodes (KAN-227).
+
+        EPUB serializers inject ``\n`` text nodes between elements, so a
+        heading followed only by blank strings has no real content in its own
+        container — the chapter body then lives after an ancestor wrapper.
+        """
+        sib = node.next_sibling
+        while sib is not None and isinstance(sib, str) and not str(sib).strip():
+            sib = sib.next_sibling
+        return sib
 
     def _split_spine_item_by_headings(self, soup, item_idx: int) -> List[Dict[str, Any]]:
         """Split a single spine item into sub-chapters by heading elements.
@@ -3110,9 +3541,16 @@ class FileService:
         Returns a list of dicts with 'title' and 'soup_fragment' keys.
         """
         sub_chapters = []
+        seen_headings = set()
 
-        # Find all heading elements
-        headings = soup.find_all(["h1", "h2", "h3", "h4"])
+        # Find all heading elements (deduped: a heading is one element even when
+        # find_all traverses multiple ancestor paths in exotic trees).
+        headings = []
+        for heading in soup.find_all(["h1", "h2", "h3", "h4"]):
+            if id(heading) in seen_headings:
+                continue
+            seen_headings.add(id(heading))
+            headings.append(heading)
 
         if len(headings) < 2:
             # 0 or 1 heading — this item is a single chapter (or no chapter)
@@ -3123,26 +3561,56 @@ class FileService:
             heading_text = heading.get_text().strip()
             if not heading_text:
                 continue
-            if self._is_narrative_prose_title(heading_text):
+            if (
+                self._is_narrative_prose_title(heading_text)
+                and not self._is_structural_chapter_heading(heading_text)
+            ):
                 print(
                     "[EPUB] Ignoring prose-like heading: "
                     f"{LogSanitizer.redact(heading_text, label='title')}"
                 )
                 continue
 
-            # Collect all siblings until the next heading of same or higher level
+            # Collect all siblings until the next heading of same or higher level.
+            #
+            # KAN-227: many EPUBs (Project Gutenberg shape) wrap each heading in
+            # its own container — ``<div class="chapter"><h2>…</h2></div>`` —
+            # with the chapter paragraphs as siblings of the *wrapper*, not of
+            # the heading. Serializers also inject whitespace-only text nodes,
+            # so "no content follows inside this container" means the next
+            # non-blank sibling is absent. Climb ancestors until a container
+            # with a real following sibling is found (bounded by <body>).
+            start_node = heading
+            while (
+                self._next_content_sibling(start_node) is None
+                and start_node.parent is not None
+                and start_node.parent.name not in ("body", "html", "[document]")
+            ):
+                start_node = start_node.parent
+
             content_elements = []
-            sibling = heading.next_sibling
-            heading_level = int(heading.name[1])  # h1=1, h2=2, etc.
+            sibling = self._next_content_sibling(start_node)
+            start_level = int(heading.name[1])  # h1=1, h2=2, etc.
 
             while sibling:
-                if hasattr(sibling, 'name') and sibling.name in ["h1", "h2", "h3", "h4"]:
-                    sibling_level = int(sibling.name[1])
-                    # Stop at same or higher level heading
-                    if sibling_level <= heading_level:
+                if getattr(sibling, "name", None):
+                    # Stop at a same-or-higher-level heading, whether it IS the
+                    # sibling or is nested inside a wrapper sibling (Gutenberg).
+                    nested = (
+                        [sibling]
+                        if sibling.name in ["h1", "h2", "h3", "h4"]
+                        else sibling.find_all(["h1", "h2", "h3", "h4"])
+                    )
+                    stop = False
+                    for sh in nested:
+                        if sh is not heading and int(sh.name[1]) <= start_level:
+                            if sh.get_text().strip():
+                                stop = True
+                                break
+                    if stop:
                         break
                 content_elements.append(sibling)
-                sibling = sibling.next_sibling
+                sibling = self._next_content_sibling(sibling)
 
             # Build content text from elements
             content_parts = []
@@ -3226,22 +3694,30 @@ class FileService:
                                 )
                                 continue
 
-                            # KAN-367 v3: Classify BEFORE incrementing chapter_number
+                            # KAN-227: classify BEFORE numbering
                             content_type = self._classify_spine_item(
-                                sub_title, item_href, sub_word_count
+                                sub_title, item_href, sub_word_count,
+                                content=sub_content,
                             )
 
                             if content_type == "chapter":
                                 chapter_number += 1
+                                # KAN-227: derive the chapter number from the
+                                # detected heading when it carries one
+                                # ("CHAPTER 9" stays 9); fall back to the
+                                # chapter-only sequence counter otherwise.
+                                sub_num = self._derive_chapter_number_from_title(
+                                    sub_title
+                                )
                                 chapters.append(self._with_generation_flag({
-                                    "number": str(chapter_number),
+                                    "number": sub_num or str(chapter_number),
                                     "title": sub_title,
                                     "content": sub_content,
                                     "type": "chapter",
                                     "content_type": "chapter",
                                 }))
                                 print(
-                                    f"[EPUB] Added chapter {chapter_number}: "
+                                    f"[EPUB] Added chapter {sub_num or chapter_number}: "
                                     f"{LogSanitizer.redact(sub_title, label='title')}"
                                 )
                             else:
@@ -3284,7 +3760,11 @@ class FileService:
                             break
 
                     # If no heading found, use first line as title or try to detect chapter pattern
-                    if title and self._is_narrative_prose_title(title):
+                    if (
+                        title
+                        and self._is_narrative_prose_title(title)
+                        and not self._is_structural_chapter_heading(title)
+                    ):
                         print(
                             "[EPUB] Rejected prose-like title candidate: "
                             f"{LogSanitizer.redact(title, label='title')}"
@@ -3318,7 +3798,7 @@ class FileService:
                     item_href = item.get_name() if hasattr(item, "get_name") else ""
                     word_count = len(clean_text.split())
                     content_type = self._classify_spine_item(
-                        title or "", item_href, word_count
+                        title or "", item_href, word_count, content=clean_text
                     )
 
                     if content_type == "chapter":
@@ -3330,15 +3810,20 @@ class FileService:
                             )
                             continue
                         chapter_number += 1
+                        # KAN-226/KAN-227: single-item path must also derive the
+                        # number from the heading — counter-only numbering hid
+                        # duplicate-number fragments (3x "Chapter 1") from the
+                        # dedupe pass and let renumbering spread them to 2, 3, 4.
+                        derived_num = self._derive_chapter_number_from_title(title)
                         chapters.append(self._with_generation_flag({
-                            "number": str(chapter_number),
+                            "number": derived_num or str(chapter_number),
                             "title": title,
                             "content": clean_text,
                             "type": "chapter",
                             "content_type": "chapter",
                         }))
                         print(
-                            f"[EPUB] Added chapter {chapter_number}: "
+                            f"[EPUB] Added chapter {derived_num or chapter_number}: "
                             f"{LogSanitizer.redact(title, label='title')}"
                         )
                     else:
@@ -3356,6 +3841,11 @@ class FileService:
                             f"[EPUB] Classified as {content_type}: "
                             f"{LogSanitizer.redact(title, label='title')}"
                         )
+
+            # --- KAN-226: collapse duplicate-numbered fragments (3x
+            # "Chapter 1") BEFORE structural renumbering can spread them
+            # across fake unique numbers ---
+            chapters = self._dedupe_chapters_by_number(chapters)
 
             # --- Dynamic front/back matter filter (structural) ---
             chapters = self._filter_front_back_matter_structural(chapters)
@@ -3376,7 +3866,8 @@ class FileService:
                     f"{untitled_page_fragment_count} untitled page fragments)"
                 )
                 reconstructed = self._reconstruct_epub_chapters_from_text(
-                    "\n\n".join(aggregate_text_parts)
+                    "\n\n".join(aggregate_text_parts),
+                    fragment_count=untitled_page_fragment_count,
                 )
                 if reconstructed:
                     return reconstructed
@@ -7299,6 +7790,13 @@ class FileService:
                     except:
                         pass
 
+        # KAN-226: Classify front/back matter and collapse duplicate chapter-number
+        # fragments (e.g. OCR-garbled scans) BEFORE deciding whether TOC extraction
+        # succeeded, so every strategy above benefits uniformly.
+        if toc_chapters:
+            toc_chapters = self._dedupe_chapters_by_number(toc_chapters)
+            toc_chapters = self._filter_front_back_matter_structural(toc_chapters)
+
         # FIX: Use TOC chapters if we found ANY reasonable number (lowered threshold)
         if len(toc_chapters) >= 3:  # Reduced from >= 2
             print(f"[TOC EXTRACTION] SUCCESS: Using {len(toc_chapters)} TOC chapters")
@@ -7355,11 +7853,18 @@ class FileService:
                 }
                 extracted_chapters.append(self._with_generation_flag(chapter_data))
 
+        # KAN-226: Collapse duplicate chapter-number fragments before classifying
+        # front/back matter, then classify so TOC/preface/appendix-style entries are
+        # marked use_in_generation=False instead of leaking into the chapter list.
+        extracted_chapters = self._dedupe_chapters_by_number(extracted_chapters)
+        extracted_chapters = self._filter_front_back_matter_structural(extracted_chapters)
+
         # Step 3: Drop chapters with less than 500 chars — likely page headers or misdetections
         pre_filter_count = len(extracted_chapters)
         extracted_chapters = [
             ch for ch in extracted_chapters
             if ch.get("section_type") == "special"
+            or ch.get("content_type") in ("front_matter", "back_matter", "metadata")
             or len(ch.get("content", "").strip()) >= 500
         ]
         if len(extracted_chapters) < pre_filter_count:
@@ -7630,6 +8135,18 @@ class FileService:
                 f"{LogSanitizer.redact(section_title, label='title')}"
             )
 
+            # KAN-367 v3: propagate content_type from the parent section
+            # so the project upload path can distinguish front/back matter.
+            # KAN-440: front/back/metadata sections are not chapters — their
+            # entries must stay unnumbered (chapter_number=None) instead of
+            # consuming global numbering slots in the BookView (Front Matter
+            # was surfacing as chapter 1 and APPENDIX as chapter 25).
+            is_non_chapter_section = section_content_type in (
+                "front_matter",
+                "back_matter",
+                "metadata",
+            )
+
             # If section has chapters within it, extract them
             if section.get("chapters"):
                 for chapter in section["chapters"]:
@@ -7641,12 +8158,14 @@ class FileService:
                         "section_title": section_title,
                         "section_type": section_type,
                         "section_number": section.get("number", str(section_index + 1)),
-                        "chapter_number": chapter_counter,
+                        "chapter_number": (
+                            None if is_non_chapter_section else chapter_counter
+                        ),
                         "number": raw_number,
                     }
                     # KAN-367 v3: propagate content_type from the parent section
                     # so the project upload path can distinguish front/back matter.
-                    if section_content_type in ("front_matter", "back_matter", "metadata"):
+                    if is_non_chapter_section:
                         chapter_data["content_type"] = section_content_type
                     elif chapter.get("content_type"):
                         chapter_data["content_type"] = chapter["content_type"]
@@ -7661,10 +8180,12 @@ class FileService:
                     "section_title": section_title,
                     "section_type": section_type,
                     "section_number": section.get("number", str(section_index + 1)),
-                    "chapter_number": chapter_counter,
+                    "chapter_number": (
+                        None if is_non_chapter_section else chapter_counter
+                    ),
                 }
                 # KAN-367 v3: propagate content_type from the section level
-                if section_content_type in ("front_matter", "back_matter", "metadata"):
+                if is_non_chapter_section:
                     chapter_data["content_type"] = section_content_type
                 all_chapters.append(self._with_generation_flag(chapter_data))
                 chapter_counter += 1

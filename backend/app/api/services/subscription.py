@@ -137,7 +137,7 @@ class SubscriptionManager:
             "model_selection": True,
             "voice_cloning": True,
             "price_monthly": 199,
-            "display_name": "Professional",
+            "display_name": "Pro",
             "description": "For studios & agencies",
         },
         SubscriptionTier.ENTERPRISE: {

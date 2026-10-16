@@ -37,6 +37,6 @@ async def test_generate_script_emits_structured_resolution_telemetry(
     assert result["telemetry"]["user_id"] == "user-456"
     assert result["telemetry"]["resolved_model"] == "zai/glm-5.2"
     assert result["telemetry"]["ladder"][0] == "zai/glm-5.2"
-    assert len(result["telemetry"]["ladder"]) == 8
+    assert len(result["telemetry"]["ladder"]) == 9
     assert result["telemetry"]["success"] is True
     assert "[ScriptModelRouter] telemetry" in caplog.text
