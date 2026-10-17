@@ -507,6 +507,10 @@ async def get_saved_consultation(
             and artifact.content.get("type") == "cinematic_universe_consultation"
             and artifact.content.get("consultation")
             and artifact.content.get("status") != "parse_error"
+            and not (
+                isinstance(artifact.content.get("consultation"), dict)
+                and artifact.content["consultation"].get("parse_error")
+            )
         ):
             consultation_artifact = artifact
             break

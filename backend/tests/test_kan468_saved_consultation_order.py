@@ -105,3 +105,50 @@ async def test_query_orders_by_created_at_desc(monkeypatch):
     )
     compiled = str(session.last_stmt)
     assert "created_at DESC" in compiled or "ORDER BY artifacts.created_at DESC" in compiled
+
+
+def _real_artifact(consultation, created_at):
+    """Artifact in the exact shape written by ConsultationService._store_consultation_result."""
+    return SimpleNamespace(
+        content={"type": "cinematic_universe_consultation", "consultation": consultation},
+        created_at=created_at,
+    )
+
+
+async def test_real_shape_parse_error_never_wins(monkeypatch):
+    """KAN-468: persisted shape nests parse_error inside consultation (no top-level status)."""
+    monkeypatch.setattr(project_routes, "ProjectService", _FakeProjectService)
+    good = _real_artifact({"suggested_names": ["Moby World"]}, "2026-09-16T10:00:00")
+    stale = _real_artifact(
+        {"suggested_names": ["Untitled Universe"], "ai_commentary": "x", "parse_error": True},
+        "2026-09-16T12:00:00",
+    )
+    session = _FakeSession([stale, good])
+    res = await project_routes.get_saved_consultation(
+        project_id=PID, current_user=SimpleNamespace(id=USER_ID), session=session
+    )
+    assert res["consultation"] == {"suggested_names": ["Moby World"]}
+
+
+async def test_store_skips_parse_error_result():
+    """KAN-468: failed consultations are not persisted (write-side guard)."""
+    from app.api.services.consultation import ConsultationService
+
+    class _S:
+        def __init__(self):
+            self.added = []
+            self.commits = 0
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.commits += 1
+
+    svc = ConsultationService.__new__(ConsultationService)
+    svc.session = _S()
+    pid = uuid.UUID(PID)
+    await svc._store_consultation_result(pid, {"suggested_names": ["U"], "parse_error": True})
+    assert svc.session.added == [] and svc.session.commits == 0
+    await svc._store_consultation_result(pid, {"suggested_names": ["Ok"]})
+    assert len(svc.session.added) == 1 and svc.session.commits == 1

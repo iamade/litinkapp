@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { projectService, Project } from "../services/projectService";
-import { apiClient } from "../lib/api";
 import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 import { 
@@ -453,31 +452,8 @@ const ProjectView: React.FC = () => {
   }, [files]);
 
   // Detect if this is a multi-script project (needs consultation)
-  // KAN-469: also mount the consultation tab when a saved consultation exists,
-  // so projects created as [plot, chapters, script] still expose the feature.
-  const [hasSavedConsultation, setHasSavedConsultation] = React.useState(false);
-  const kan469ProjectId = project?.id;
-  React.useEffect(() => {
-    if (!kan469ProjectId) return;
-    let cancelled = false;
-    apiClient
-      .get<{ status: string; consultation?: unknown }>(
-        '/projects/' + kan469ProjectId + '/consultation/saved'
-      )
-      .then((res) => {
-        if (!cancelled && res?.status === 'success' && res.consultation) {
-          setHasSavedConsultation(true);
-        }
-      })
-      .catch(() => {
-        /* absence of a saved consultation is not an error */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [kan469ProjectId]);
-  const isMultiScriptProject =
-    Boolean(project?.pipeline_steps?.includes('consultation')) || hasSavedConsultation;
+  const isMultiScriptProject = project?.pipeline_steps?.includes('consultation');
+
   // Filter video generations by selected script at the top level
   const filteredVideoGenerations = React.useMemo(() => {
     if (!selectedScriptId || !videoGenerations) return videoGenerations;
