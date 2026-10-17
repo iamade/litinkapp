@@ -147,6 +147,9 @@ const ChapterContentModal: React.FC<ChapterContentModalProps> = ({ chapter, onCl
   );
 };
 
+export const shouldMountConsultationTab = (pipelineSteps: string[] | undefined, hasSavedConsultation: boolean): boolean =>
+  Boolean(pipelineSteps?.includes('consultation')) || hasSavedConsultation;
+
 const ProjectView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -476,8 +479,7 @@ const ProjectView: React.FC = () => {
       cancelled = true;
     };
   }, [kan469ProjectId]);
-  const isMultiScriptProject =
-    Boolean(project?.pipeline_steps?.includes('consultation')) || hasSavedConsultation;
+  const isMultiScriptProject = shouldMountConsultationTab(project?.pipeline_steps, hasSavedConsultation);
   // Filter video generations by selected script at the top level
   const filteredVideoGenerations = React.useMemo(() => {
     if (!selectedScriptId || !videoGenerations) return videoGenerations;
