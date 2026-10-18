@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { projectService, Project } from "../services/projectService";
+import { apiClient } from "../lib/api";
 import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 import { 
@@ -144,6 +145,45 @@ const ChapterContentModal: React.FC<ChapterContentModalProps> = ({ chapter, onCl
       </div>
     </div>
   );
+};
+
+export const shouldMountConsultationTab = (pipelineSteps: string[] | undefined, hasSavedConsultation: boolean): boolean =>
+  Boolean(pipelineSteps?.includes('consultation')) || hasSavedConsultation;
+
+export const useSavedConsultationFlag = (projectId?: string): boolean => {
+  const [hasSavedConsultation, setHasSavedConsultation] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setHasSavedConsultation(false);
+
+    if (!projectId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    apiClient
+      .get<{ status: string; consultation?: unknown }>(
+        '/projects/' + projectId + '/consultation/saved'
+      )
+      .then((res) => {
+        if (!cancelled) {
+          setHasSavedConsultation(Boolean(res?.status === 'success' && res.consultation));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHasSavedConsultation(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  return hasSavedConsultation;
 };
 
 const ProjectView: React.FC = () => {
@@ -452,8 +492,10 @@ const ProjectView: React.FC = () => {
   }, [files]);
 
   // Detect if this is a multi-script project (needs consultation)
-  const isMultiScriptProject = project?.pipeline_steps?.includes('consultation');
-
+  // KAN-469: also mount the consultation tab when a saved consultation exists,
+  // so projects created as [plot, chapters, script] still expose the feature.
+  const hasSavedConsultation = useSavedConsultationFlag(project?.id);
+  const isMultiScriptProject = shouldMountConsultationTab(project?.pipeline_steps, hasSavedConsultation);
   // Filter video generations by selected script at the top level
   const filteredVideoGenerations = React.useMemo(() => {
     if (!selectedScriptId || !videoGenerations) return videoGenerations;
