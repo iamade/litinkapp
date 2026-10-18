@@ -29,10 +29,8 @@ from pathlib import Path
 import pytest
 
 
-# CRITICAL: read deployed file (not worktree). Per hard rule learned 13:32 UTC.
-CINEMATIC_GATES = Path(
-    "/opt/openclaw/repos/litinkapp-dev/backend/app/api/routes/ai/cinematic_gates.py"
-)
+# Read the cinematic route in this checkout so the test covers the commit under test.
+CINEMATIC_GATES = Path(__file__).resolve().parents[1] / 'app/api/routes/ai/cinematic_gates.py'
 
 
 def _read(path: Path) -> str:
