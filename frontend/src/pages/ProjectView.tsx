@@ -150,6 +150,42 @@ const ChapterContentModal: React.FC<ChapterContentModalProps> = ({ chapter, onCl
 export const shouldMountConsultationTab = (pipelineSteps: string[] | undefined, hasSavedConsultation: boolean): boolean =>
   Boolean(pipelineSteps?.includes('consultation')) || hasSavedConsultation;
 
+export const useSavedConsultationFlag = (projectId?: string): boolean => {
+  const [hasSavedConsultation, setHasSavedConsultation] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setHasSavedConsultation(false);
+
+    if (!projectId) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    apiClient
+      .get<{ status: string; consultation?: unknown }>(
+        '/projects/' + projectId + '/consultation/saved'
+      )
+      .then((res) => {
+        if (!cancelled) {
+          setHasSavedConsultation(Boolean(res?.status === 'success' && res.consultation));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHasSavedConsultation(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  return hasSavedConsultation;
+};
+
 const ProjectView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -458,27 +494,7 @@ const ProjectView: React.FC = () => {
   // Detect if this is a multi-script project (needs consultation)
   // KAN-469: also mount the consultation tab when a saved consultation exists,
   // so projects created as [plot, chapters, script] still expose the feature.
-  const [hasSavedConsultation, setHasSavedConsultation] = React.useState(false);
-  const kan469ProjectId = project?.id;
-  React.useEffect(() => {
-    if (!kan469ProjectId) return;
-    let cancelled = false;
-    apiClient
-      .get<{ status: string; consultation?: unknown }>(
-        '/projects/' + kan469ProjectId + '/consultation/saved'
-      )
-      .then((res) => {
-        if (!cancelled && res?.status === 'success' && res.consultation) {
-          setHasSavedConsultation(true);
-        }
-      })
-      .catch(() => {
-        /* absence of a saved consultation is not an error */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [kan469ProjectId]);
+  const hasSavedConsultation = useSavedConsultationFlag(project?.id);
   const isMultiScriptProject = shouldMountConsultationTab(project?.pipeline_steps, hasSavedConsultation);
   // Filter video generations by selected script at the top level
   const filteredVideoGenerations = React.useMemo(() => {
