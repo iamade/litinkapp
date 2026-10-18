@@ -1,3 +1,4 @@
+from sqlalchemy import text as sa_text  # KAN-182
 from typing import Dict, Any, List, Optional
 import uuid
 import json
@@ -1919,6 +1920,47 @@ Return the enhanced script.
 """
 
         return prompt.strip()
+
+    async def get_or_create_project_plot_overview(
+        self, user_id: uuid.UUID, project_id: uuid.UUID
+    ) -> Optional[PlotOverviewResponse]:
+        """KAN-182: first authorized access to a project's plot overview must
+        create-or-return idempotently instead of 404ing until generation.
+
+        Concurrency: a transaction-scoped Postgres advisory lock keyed on the
+        project serializes first creation, and existence is re-checked under
+        the lock, so concurrent first GETs persist exactly one row. Ownership
+        must already be validated by the caller (route enforces 403).
+        """
+        existing = await self.get_plot_overview(user_id=user_id, book_id=project_id)
+        if existing:
+            return existing
+
+        bind = getattr(self.session, "bind", None)
+        dialect = getattr(getattr(bind, "dialect", None), "name", None)
+        if dialect == "postgresql":
+            await self.session.execute(
+                sa_text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                {"k": f"plot_overview:{project_id}"},
+            )
+            existing = await self.get_plot_overview(
+                user_id=user_id, book_id=project_id
+            )
+            if existing:
+                # end the xact so the advisory lock is released immediately
+                await self.session.commit()
+                return existing
+
+        row = PlotOverview(
+            book_id=project_id,
+            user_id=user_id,
+            themes=[],
+            status="pending",
+            generation_method="kan182_first_access_empty",
+        )
+        self.session.add(row)
+        await self.session.commit()
+        return await self.get_plot_overview(user_id=user_id, book_id=project_id)
 
     async def get_plot_overview(
         self, user_id: uuid.UUID, book_id: uuid.UUID
