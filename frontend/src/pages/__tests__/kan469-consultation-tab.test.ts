@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../lib/api', () => ({
@@ -24,15 +24,29 @@ describe('KAN-469 consultation tab eligibility', () => {
   it('does not mount without either condition', () => expect(shouldMountConsultationTab(['plot', 'chapters', 'script'], false)).toBe(false));
 
   it('resets on an A-to-B project switch and remains false for B null data', async () => {
+    const savedB = deferred<{ status: string; consultation: unknown }>();
     getSavedConsultation
       .mockResolvedValueOnce({ status: 'success', consultation: { id: 'saved-a' } })
-      .mockResolvedValueOnce({ status: 'success', consultation: null });
+      .mockReturnValueOnce(savedB.promise);
     const { result, rerender } = renderHook(({ projectId }) => useSavedConsultationFlag(projectId), { initialProps: { projectId: 'A' } });
     await waitFor(() => expect(result.current).toBe(true));
 
     rerender({ projectId: 'B' });
     expect(result.current).toBe(false);
     await waitFor(() => expect(getSavedConsultation).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      savedB.resolve({ status: 'success', consultation: null });
+      await savedB.promise;
+    });
+    expect(result.current).toBe(false);
+    expect(shouldMountConsultationTab(['plot', 'chapters', 'script'], result.current)).toBe(false);
+  });
+
+  it('remains false when the saved consultation request errors', async () => {
+    getSavedConsultation.mockRejectedValueOnce(new Error('network unavailable'));
+    const { result } = renderHook(() => useSavedConsultationFlag('A'));
+
     await waitFor(() => expect(result.current).toBe(false));
     expect(shouldMountConsultationTab(['plot', 'chapters', 'script'], result.current)).toBe(false);
   });
