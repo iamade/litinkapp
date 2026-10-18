@@ -79,6 +79,7 @@ celery_app.conf.imports = [
     "app.tasks.embedding_tasks",
     "app.tasks.plot_tasks",
     "app.tasks.media_backfill_task",
+    "app.tasks.model_watcher_tasks",
 ]
 
 # Celery Beat periodic schedule
