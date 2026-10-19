@@ -81,8 +81,8 @@ class VideoGeneration(SQLModel, table=True):
     audio_task_id: Optional[str] = Field(default=None)
     continuity_frame_url: Optional[str] = Field(default=None)
 
-    can_resume: bool = Field(default=False)
-    retry_count: int = Field(default=0)
+    can_resume: bool = Field(default=False, sa_column=Column(sa.Boolean, nullable=False, server_default="false"))
+    retry_count: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
     error_message: Optional[str] = Field(default=None)
 
     # JSON fields
@@ -457,7 +457,7 @@ class PipelineStepModel(SQLModel, table=True):
     started_at: Optional[datetime] = Field(default=None)
     completed_at: Optional[datetime] = Field(default=None)
     error_message: Optional[str] = Field(default=None)
-    retry_count: int = Field(default=0)
+    retry_count: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
 
     step_data: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
