@@ -1,48 +1,47 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { apiClient } from "../lib/api";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import {
   CREDITS_POLLING_END_EVENT,
   CREDITS_POLLING_START_EVENT,
 } from "../lib/activeGeneration";
-import {
-  CREDITS_REFRESH_EVENT,
-  CreditBalanceResponse,
-} from "../lib/credits";
+import { CREDITS_REFRESH_EVENT } from "../lib/credits";
+import { creditBalanceStore } from "../lib/creditBalanceStore";
 
 interface UseCreditBalanceOptions {
   enabled?: boolean;
   refreshIntervalMs?: number;
 }
 
+/**
+ * KAN-216: read the shared balance instead of fetching per hook instance.
+ *
+ * Previously each mount (Navbar, ProjectView, VideoProductionPanel,
+ * ScriptGenerationPanel, ImagesPanel, AudioPanel) issued its own
+ * GET /credits/balance, so one page render produced up to 6 identical calls.
+ * The store owns the fetch and coalesces concurrent requests; this hook keeps
+ * the same return shape ({ balance, loading, refreshBalance }) so callers are
+ * unchanged.
+ */
 export function useCreditBalance(options: UseCreditBalanceOptions = {}) {
   const { enabled = true, refreshIntervalMs = 45000 } = options;
-  const [balance, setBalance] = useState<number>(0);
-  const [loading, setLoading] = useState(false);
   const intervalRef = useRef<number | null>(null);
-  const pendingRef = useRef(false);
+
+  const balance = useSyncExternalStore(
+    creditBalanceStore.subscribe,
+    creditBalanceStore.getBalance,
+    creditBalanceStore.getBalance
+  );
+  const loading = useSyncExternalStore(
+    creditBalanceStore.subscribe,
+    creditBalanceStore.getLoading,
+    creditBalanceStore.getLoading
+  );
 
   const refreshBalance = useCallback(async () => {
-    if (!enabled || pendingRef.current) return;
-
-    pendingRef.current = true;
-    try {
-      setLoading(true);
-      const response = await apiClient.get<CreditBalanceResponse>("/credits/balance");
-      setBalance(response.total_credits || 0);
-    } catch {
-      // Silently fail to avoid noisy toasts in global UI surfaces.
-    } finally {
-      setLoading(false);
-      pendingRef.current = false;
-    }
+    if (!enabled) return;
+    // Store-level coalescing replaces the old per-hook pendingRef guard, which
+    // only stopped duplicate calls from the same component instance.
+    await creditBalanceStore.refresh();
   }, [enabled]);
-
-  const startInterval = useCallback(() => {
-    if (intervalRef.current) return;
-    intervalRef.current = window.setInterval(() => {
-      refreshBalance();
-    }, refreshIntervalMs);
-  }, [refreshBalance, refreshIntervalMs]);
 
   const stopInterval = useCallback(() => {
     if (intervalRef.current) {
@@ -51,20 +50,26 @@ export function useCreditBalance(options: UseCreditBalanceOptions = {}) {
     }
   }, []);
 
+  const startInterval = useCallback(() => {
+    if (intervalRef.current) return;
+    intervalRef.current = window.setInterval(() => {
+      creditBalanceStore.refresh();
+    }, refreshIntervalMs);
+  }, [refreshIntervalMs]);
+
   useEffect(() => {
     if (!enabled) return;
 
-    refreshBalance();
+    creditBalanceStore.refresh();
 
-    // Coalesce rapid refresh events: if a request is already in flight, the
-    // burst of CREDITS_REFRESH_EVENT dispatches during a generation does not
-    // create additional GET /credits/balance calls (KAN-436).
+    // Coalesced by the store: the burst of CREDITS_REFRESH_EVENT dispatches
+    // during a generation collapses into one in-flight request (KAN-436).
     const onRefresh = () => {
-      refreshBalance();
+      creditBalanceStore.refresh();
     };
 
     const onFocus = () => {
-      refreshBalance();
+      creditBalanceStore.refresh();
     };
 
     // Suspend the background interval while long-running generation jobs are
