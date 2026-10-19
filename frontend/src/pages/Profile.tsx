@@ -6,7 +6,6 @@ import {
   Award,
   BookOpen,
   Clock,
-  Star,
   Trophy,
   Target,
   Calendar,
@@ -18,6 +17,24 @@ import {
 } from "lucide-react";
 import { useUserMode } from "../hooks/useUserMode";
 import CreditHistory from "../components/Credits/CreditHistory";
+
+type ProfileBadge = {
+  id: number;
+  name: string;
+  description: string;
+  earned: boolean;
+  rarity: string;
+  earnedDate: string | null;
+};
+
+type ProfileActivity = {
+  id: number;
+  type: string;
+  title: string;
+  description: string;
+  timestamp: string;
+  icon: React.ElementType;
+};
 
 export default function Profile() {
   const { user } = useAuth();
@@ -35,99 +52,21 @@ export default function Profile() {
     );
   }
 
+  // KAN-489/490/491: deliberately zero until real per-user progress is wired
+  // (KAN-492, MVP slice - out of scope here). Never seed fabricated
+  // achievements: a brand-new account must not show a 15-day streak, 8 earned
+  // badges, or reading history it does not have.
   const stats = {
-    booksRead: 12,
-    booksUploaded: 3,
-    hoursSpent: 45,
-    badgesEarned: 8,
-    streakDays: 15,
+    booksRead: 0,
+    booksUploaded: 0,
+    hoursSpent: 0,
+    badgesEarned: 0,
+    streakDays: 0,
   };
 
-  const badges = [
-    {
-      id: 1,
-      name: "First Steps",
-      description: "Completed your first lesson",
-      earned: true,
-      rarity: "common",
-      earnedDate: "2024-01-15",
-    },
-    {
-      id: 2,
-      name: "Bookworm",
-      description: "Read 10 books",
-      earned: true,
-      rarity: "uncommon",
-      earnedDate: "2024-01-18",
-    },
-    {
-      id: 3,
-      name: "AI Explorer",
-      description: "Used all AI features",
-      earned: true,
-      rarity: "rare",
-      earnedDate: "2024-01-20",
-    },
-    {
-      id: 4,
-      name: "Speed Reader",
-      description: "Complete 5 books in one week",
-      earned: false,
-      rarity: "epic",
-      earnedDate: null,
-    },
-    {
-      id: 5,
-      name: "Story Master",
-      description: "Complete 10 interactive stories",
-      earned: true,
-      rarity: "rare",
-      earnedDate: "2024-01-22",
-    },
-    {
-      id: 6,
-      name: "Knowledge Seeker",
-      description: "Earn perfect scores on 20 quizzes",
-      earned: false,
-      rarity: "legendary",
-      earnedDate: null,
-    },
-  ];
+  const badges: ProfileBadge[] = [];
 
-  const recentActivity = [
-    {
-      id: 1,
-      type: "completed",
-      title: "Introduction to Machine Learning",
-      description: "Completed lesson: Neural Networks Basics",
-      timestamp: "2 hours ago",
-      icon: BookOpen,
-    },
-    {
-      id: 2,
-      type: "badge",
-      title: "Story Master",
-      description: "Earned badge for completing interactive stories",
-      timestamp: "1 day ago",
-      icon: Award,
-    },
-    {
-      id: 3,
-      type: "streak",
-      title: "15-Day Streak!",
-      description: "Maintained daily learning streak",
-      timestamp: "2 days ago",
-      icon: Zap,
-    },
-    {
-      id: 4,
-      type: "completed",
-      title: "The Crystal Chronicles",
-      description: "Finished interactive story with ending #3",
-      timestamp: "3 days ago",
-      icon: Star,
-    },
-  ];
+  const recentActivity: ProfileActivity[] = [];
 
   const getRarityColor = (rarity: string) => {
     switch (rarity) {
@@ -169,10 +108,12 @@ export default function Profile() {
                     Content Creator
                   </span>
                 )}
-                <span className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium flex items-center">
-                  <Zap className="h-4 w-4 mr-1" />
-                  {stats.streakDays} day streak
-                </span>
+                {stats.streakDays > 0 && (
+                  <span className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium flex items-center">
+                    <Zap className="h-4 w-4 mr-1" />
+                    {stats.streakDays} day streak
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -275,6 +216,12 @@ export default function Profile() {
                 Recent Activity
               </h2>
               <div className="space-y-4">
+                {recentActivity.length === 0 && (
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    No activity yet. Your reading and listening history will
+                    appear here.
+                  </p>
+                )}
                 {recentActivity.map((activity) => (
                   <div
                     key={activity.id}
@@ -310,6 +257,12 @@ export default function Profile() {
                 Achievement Badges
               </h2>
               <div className="space-y-4">
+                {badges.length === 0 && (
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    No badges earned yet. Badges appear here as you read,
+                    finish stories and reach milestones.
+                  </p>
+                )}
                 {badges.map((badge) => (
                   <div
                     key={badge.id}
@@ -377,12 +330,12 @@ export default function Profile() {
                     <span className="font-medium text-gray-900 dark:text-white">
                       Weekly Reading Goal
                     </span>
-                    <span className="text-gray-600 dark:text-gray-400">3/5 books</span>
+                    <span className="text-gray-600 dark:text-gray-400">0/5 books</span>
                   </div>
                   <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div
                       className="bg-gradient-to-r from-green-500 to-blue-600 h-2 rounded-full"
-                      style={{ width: "60%" }}
+                      style={{ width: "0%" }}
                     ></div>
                   </div>
                 </div>
@@ -391,12 +344,12 @@ export default function Profile() {
                     <span className="font-medium text-gray-900 dark:text-white">
                       Badge Collection
                     </span>
-                    <span className="text-gray-600 dark:text-gray-400">8/12 earned</span>
+                    <span className="text-gray-600 dark:text-gray-400">0/12 earned</span>
                   </div>
                   <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div
                       className="bg-gradient-to-r from-purple-500 to-pink-600 h-2 rounded-full"
-                      style={{ width: "67%" }}
+                      style={{ width: "0%" }}
                     ></div>
                   </div>
                 </div>
@@ -405,12 +358,12 @@ export default function Profile() {
                     <span className="font-medium text-gray-900 dark:text-white">
                       Learning Streak
                     </span>
-                    <span className="text-gray-600 dark:text-gray-400">15/30 days</span>
+                    <span className="text-gray-600 dark:text-gray-400">0/30 days</span>
                   </div>
                   <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div
                       className="bg-gradient-to-r from-orange-500 to-yellow-600 h-2 rounded-full"
-                      style={{ width: "50%" }}
+                      style={{ width: "0%" }}
                     ></div>
                   </div>
                 </div>
