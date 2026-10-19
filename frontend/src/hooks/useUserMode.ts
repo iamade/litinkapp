@@ -5,12 +5,38 @@ import { isExplorerModeEnabled } from '../lib/explorerMode';
 
 export type UserMode = 'explorer' | 'creator';
 
+/**
+ * KAN-216: previously every useUserMode mount (Navbar, Profile,
+ * BookViewForEntertainment) issued its own GET /users/me, even though
+ * AuthContext already loads the same payload at startup and the User type
+ * carries preferred_mode. Now the auth user is the source of truth; the
+ * network call only happens when preferred_mode is genuinely absent, and
+ * concurrent mounts share one in-flight request.
+ */
+let modeInflight: Promise<UserMode | null> | null = null;
+
+async function fetchPreferredMode(): Promise<UserMode | null> {
+  if (modeInflight) return modeInflight;
+  modeInflight = apiClient
+    .get<{ preferred_mode: UserMode }>('/users/me')
+    .then((profile) => profile.preferred_mode || null)
+    .catch(() => null)
+    .finally(() => {
+      modeInflight = null;
+    });
+  return modeInflight;
+}
+
 export const useUserMode = () => {
   const { user } = useAuth();
   const [mode, setMode] = useState<UserMode>('creator');
   const [isLoading, setIsLoading] = useState(true);
 
+  const authMode = user?.preferred_mode;
+
   useEffect(() => {
+    let cancelled = false;
+
     const loadUserMode = async () => {
       if (!user) {
         setMode('creator');
@@ -27,32 +53,45 @@ export const useUserMode = () => {
       // precise role based enforcement
       const hasCreator = user.roles?.includes('creator');
       const hasExplorer = user.roles?.includes('explorer');
-      
+
       if (hasCreator && !hasExplorer) {
         setMode('creator');
         setIsLoading(false);
-        return; 
+        return;
       }
-      
+
       if (!hasCreator && hasExplorer) {
         setMode('explorer');
         setIsLoading(false);
         return;
       }
 
+      // Both roles (or neither): preferred_mode decides. Reuse what
+      // AuthContext already fetched instead of re-requesting /users/me.
+      if (authMode === 'creator' || authMode === 'explorer') {
+        setMode(authMode);
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        const profile = await apiClient.get<{ preferred_mode: UserMode }>('/users/me');
-        setMode(profile.preferred_mode || 'creator');
+        const fetched = await fetchPreferredMode();
+        if (cancelled) return;
+        setMode(fetched || 'creator');
       } catch (error) {
+        if (cancelled) return;
         console.error('Failed to load user mode:', error);
         setMode('creator');
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     loadUserMode();
-  }, [user]);
+    return () => {
+      cancelled = true;
+    };
+  }, [user, authMode]);
 
   const switchMode = async (newMode: UserMode) => {
     if (!user) return;
