@@ -4,6 +4,25 @@ Root cause: route returns Chapter ORM model_dump() whose id/book_id are uuid.UUI
 while response_model ChapterSchema declares them str; pydantic v2 does not coerce
 UUID->str, so FastAPI response validation raises -> HTTP 500.
 """
+import os
+
+# KAN-488 bare-env guard: run without an external DATABASE_URL etc.
+# Use the asyncpg driver: a sync postgresql:// URL makes engine construction fail
+# with AsyncAdaptedQueuePool before any assertion runs.
+os.environ.setdefault("ENVIRONMENT", "staging")
+os.environ.setdefault("JWT_SECRET_KEY", "x" * 48)
+os.environ.setdefault("OPENAI_API_KEY", "sk-dummy")
+os.environ.setdefault("MODELSLAB_API_KEY", "dummy")
+os.environ.setdefault("MAIL_FROM", "noreply@example.com")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test")
+os.environ.setdefault("STRIPE_SECRET_KEY", "***")
+os.environ.setdefault("STRIPE_PUBLISHABLE_KEY", "pk_test_dummy")
+os.environ.setdefault("KLINGAI_ACCESS_KEY", "dummy")
+os.environ.setdefault("KLINGAI_ACCESS_KEY_SECRET", "dummy")
+for _k in ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "REDIS_URL", "CELERY_BROKER_URL"]:
+    os.environ.setdefault(_k, "dummy")
+os.environ.setdefault("SMTP_PORT", "0")
+
 import asyncio
 import uuid
 from types import SimpleNamespace
