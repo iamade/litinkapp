@@ -21,6 +21,23 @@ This test suite validates:
 
 from __future__ import annotations
 
+import os
+
+# KAN-488 env guard: this file must run in a bare env (no external DATABASE_URL etc.).
+os.environ.setdefault("ENVIRONMENT", "staging")
+os.environ.setdefault("JWT_SECRET_KEY", "x" * 48)
+os.environ.setdefault("OPENAI_API_KEY", "sk-dummy")
+os.environ.setdefault("MODELSLAB_API_KEY", "dummy")
+os.environ.setdefault("MAIL_FROM", "noreply@example.com")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("STRIPE_SECRET_KEY", "***")
+os.environ.setdefault("STRIPE_PUBLISHABLE_KEY", "pk_test_dummy")
+os.environ.setdefault("KLINGAI_ACCESS_KEY", "dummy")
+os.environ.setdefault("KLINGAI_ACCESS_KEY_SECRET", "dummy")
+for _k in ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "REDIS_URL", "CELERY_BROKER_URL"]:
+    os.environ.setdefault(_k, "dummy")
+os.environ.setdefault("SMTP_PORT", "0")
+
 import ast
 import uuid as _uuid
 import json
@@ -29,9 +46,10 @@ from pathlib import Path
 import pytest
 
 
-# CRITICAL: read deployed file (not worktree). Per hard rule learned 13:32 UTC.
-CINEMATIC_GATES = Path(
-    "/opt/openclaw/repos/litinkapp-dev/backend/app/api/routes/ai/cinematic_gates.py"
+# Read the cinematic_gates copy in the checkout under test, so the assertions
+# always describe the commit being tested (not a host-specific deploy dir).
+CINEMATIC_GATES = (
+    Path(__file__).resolve().parents[1] / "app/api/routes/ai/cinematic_gates.py"
 )
 
 
