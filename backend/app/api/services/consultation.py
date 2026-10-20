@@ -207,6 +207,14 @@ Based on the above scripts and the user's creative direction, provide your cinem
         consultation_result: Dict[str, Any],
     ) -> None:
         """Store the consultation result as a project artifact."""
+        # KAN-468: never persist failed (parse_error) consultations; they would
+        # otherwise shadow the last successful saved consultation.
+        if consultation_result.get("parse_error"):
+            logger.warning(
+                "KAN-468: skipping persistence of parse_error consultation for project %s",
+                project_id,
+            )
+            return
         artifact = Artifact(
             project_id=project_id,
             artifact_type=ArtifactType.DOCUMENT_SUMMARY,  # Using this type for consultation

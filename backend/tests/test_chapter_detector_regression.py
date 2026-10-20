@@ -354,8 +354,10 @@ class TestHierarchicalSectionAssignment:
         )
 
         # ETYMOLOGY = front_matter, Chapters = chapter, EPILOGUE = back_matter
+        # KAN-440: read-only matter stays unnumbered (chapter_number=None);
+        # real chapters keep their global counter slots (2 and 3 here).
         assert chapters[0]["content_type"] == "front_matter"
-        assert chapters[0]["chapter_number"] == 1
+        assert chapters[0]["chapter_number"] is None
         assert chapters[1]["content_type"] == "chapter"
         assert chapters[1]["chapter_number"] == 2
         assert chapters[1]["number"] == "1"
@@ -363,7 +365,7 @@ class TestHierarchicalSectionAssignment:
         assert chapters[2]["chapter_number"] == 3
         assert chapters[2]["number"] == "2"
         assert chapters[3]["content_type"] == "back_matter"
-        assert chapters[3]["chapter_number"] == 4
+        assert chapters[3]["chapter_number"] is None
 
         # ETYMOLOGY content must not contain chapter body text
         assert "Carpet-Bag" not in chapters[0]["content"]

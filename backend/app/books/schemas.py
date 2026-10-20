@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Any, Dict, Optional, List
 from datetime import datetime
 
@@ -136,6 +136,13 @@ class Chapter(ChapterBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    # KAN-483: ORM Chapter.id/book_id are uuid.UUID; pydantic v2 does not coerce
+    # UUID -> str, so GET /books/{id}/chapters failed response validation (500).
+    @field_validator("id", "book_id", mode="before")
+    @classmethod
+    def _uuid_to_str(cls, v):
+        return str(v) if v is not None and not isinstance(v, str) else v
 
 
 # Enhanced Chapter with section relationship

@@ -6,34 +6,70 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add backend directory to path
 backend_dir = Path(__file__).parent / "backend"
 sys.path.insert(0, str(backend_dir))
 
-from supabase import create_client
-from dotenv import load_dotenv
+# KAN-482: collection guard. This module historically ran its Supabase
+# setup checks (and sys.exit(1) on a missing .env or missing credentials)
+# at import time, which killed whole-directory pytest collection before
+# any test could run. Module-level collection must never sys.exit, so skip
+# the entire module unless the live service-role checks are explicitly
+# requested via the opt-in environment variable.
+RUN_SUPERADMIN_SETUP_TESTS = "RUN_SUPERADMIN_SETUP_TESTS"
 
-# Load environment variables
-env_path = backend_dir / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
-else:
-    print("⚠️  No .env file found in backend directory")
-    sys.exit(1)
+if os.getenv(RUN_SUPERADMIN_SETUP_TESTS) != "1":
+    pytest.skip(
+        "Superadmin setup checks are opt-in (live Supabase service-role "
+        f"verification). Set {RUN_SUPERADMIN_SETUP_TESTS}=1 to run them.",
+        allow_module_level=True,
+    )
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+# Opt-in path: preserve the original setup-check behavior (load .env,
+# validate credentials, create the service-role client), deferred out of
+# import time so the module's tests remain collectible when enabled.
+supabase = None
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print("❌ Missing Supabase credentials in .env file")
-    sys.exit(1)
 
-# Create Supabase client with service role key
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+def _load_supabase_client():
+    """Run the original module-level setup checks and build the client.
+
+    sys.exit(1) on missing configuration is pre-guard behavior and is
+    intentionally preserved on the opt-in path.
+    """
+    global supabase
+    if supabase is not None:
+        return supabase
+
+    from supabase import create_client
+    from dotenv import load_dotenv
+
+    # Load environment variables
+    env_path = backend_dir / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+    else:
+        print("⚠️  No .env file found in backend directory")
+        sys.exit(1)
+
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("❌ Missing Supabase credentials in .env file")
+        sys.exit(1)
+
+    # Create Supabase client with service role key
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return supabase
+
 
 def check_superadmin_profile():
     """Check if superadmin profile exists"""
     print("\n1. Checking for superadmin profile...")
+    supabase = _load_supabase_client()
     try:
         response = supabase.table('profiles').select('*').eq('email', 'support@litinkai.com').execute()
 
@@ -68,6 +104,7 @@ def check_superadmin_profile():
 def check_database_functions():
     """Check if required database functions exist"""
     print("\n2. Checking database functions...")
+    supabase = _load_supabase_client()
 
     functions_to_check = [
         'is_superadmin',
@@ -113,6 +150,7 @@ def check_auth_user():
 def test_role_functions():
     """Test role management functions"""
     print("\n4. Testing role management functions...")
+    supabase = _load_supabase_client()
 
     try:
         # Call the check_superadmin_users function

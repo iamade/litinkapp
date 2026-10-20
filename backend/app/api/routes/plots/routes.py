@@ -355,8 +355,12 @@ async def create_character_placeholder(
             }
 
         # Create placeholder character
+        # KAN-331: book_id/user_id are nullable=False on Character; thread them
+        # in from request scope so the INSERT doesn't raise NotNullViolation.
         new_character = Character(
             plot_overview_id=plot_overview.id,
+            book_id=book_id,
+            user_id=current_user.id,
             name=character_name,
             entity_type=entity_type,
             role="supporting" if entity_type == "character" else entity_type,
@@ -595,10 +599,11 @@ async def get_project_plot_overview(
                 status_code=403, detail="Not authorized to access this project"
             )
 
-        # Get plot overview (project_id is stored in book_id field)
+        # KAN-182: first authorized access creates-or-returns an empty overview
+        # (project_id is stored in book_id field) instead of a persistent 404.
         plot_service = PlotService(session)
-        plot_overview = await plot_service.get_plot_overview(
-            user_id=current_user.id, book_id=project_id
+        plot_overview = await plot_service.get_or_create_project_plot_overview(
+            user_id=current_user.id, project_id=project_id
         )
 
         if not plot_overview:
