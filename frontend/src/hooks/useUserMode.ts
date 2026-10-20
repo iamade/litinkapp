@@ -28,7 +28,7 @@ async function fetchPreferredMode(): Promise<UserMode | null> {
 }
 
 export const useUserMode = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [mode, setMode] = useState<UserMode>('creator');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -100,6 +100,11 @@ export const useUserMode = () => {
     try {
       await apiClient.put('/users/me', { preferred_mode: newMode });
       setMode(newMode);
+      // KAN-216 follow-up: publish the new mode into the shared auth user.
+      // Without this, the auth value stays stale and any component mounting
+      // after the switch (Profile, etc.) reads the old preferred_mode from
+      // AuthContext until a full page reload.
+      updateUser?.({ preferred_mode: newMode });
       return true;
     } catch (error) {
       console.error('Failed to switch mode:', error);

@@ -58,6 +58,13 @@ interface AuthContextType {
   resendVerificationEmail: (email: string) => Promise<void>;
   addRole: (role: "author" | "explorer") => Promise<void>;
   removeRole: (role: "author" | "explorer") => Promise<void>;
+  /**
+   * KAN-216: merge a partial patch into the shared auth user so consumers
+   * that mount later (e.g. Profile after a mode switch) read the updated
+   * value instead of a stale one. switchMode uses this to publish
+   * preferred_mode without a full reload or an extra GET /users/me.
+   */
+  updateUser: (patch: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -164,6 +171,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(profile);
   };
 
+  const updateUser = (patch: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
   const requestPasswordReset = async (email: string) => {
     await apiClient.post("/auth/request-password-reset", { email });
   };
@@ -206,6 +217,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         resendVerificationEmail,
         addRole,
         removeRole,
+        updateUser,
       }}
     >
       {children}
