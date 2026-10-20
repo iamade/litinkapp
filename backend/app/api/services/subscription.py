@@ -521,9 +521,21 @@ class SubscriptionManager:
         old_status = subscription.status
         status = self._normalize_stripe_status(subscription_data.get("status"))
         subscription.status = status
-        subscription.cancel_at_period_end = bool(
+        # KAN-462 v10: webhook re-sync must never downgrade a locally-set
+        # cancel_at_period_end. A cancel may be committed locally via the
+        # Stripe-missing fallback (cancel_subscription) or by an earlier
+        # webhook; a subsequent webhook carrying cancel_at_period_end=False
+        # (or omitting it, defaulting to False) must NOT clobber that.
+        # Downgrade only happens via the terminal `subscription.deleted`
+        # branch below (Stripe status == canceled).
+        stripe_cap = bool(
             subscription_data.get("cancel_at_period_end", False)
         )
+        if not (
+            subscription.cancel_at_period_end
+            and not stripe_cap
+        ):
+            subscription.cancel_at_period_end = stripe_cap
         if subscription_data.get("current_period_start") is not None:
             subscription.current_period_start = self._stripe_ts_to_datetime(
                 subscription_data.get("current_period_start")
@@ -568,6 +580,11 @@ class SubscriptionManager:
 
         # Update local database
         old_status = subscription.status
+        # KAN-462 v10: reactivate legitimately clears the local cancel flag
+        # (user-initiated un-cancel); this branch is not clobber, but we keep
+        # the explicit assignment isolated from the webhook-sync guard above
+        # for clarity. The downstream Stripe re-sync (via webhook) will then
+        # be a no-op if Stripe also reports cap=false.
         subscription.cancel_at_period_end = False
         subscription.cancelled_at = None
         subscription.updated_at = datetime.now()
