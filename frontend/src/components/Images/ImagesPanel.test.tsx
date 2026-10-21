@@ -1,31 +1,44 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { ImagesPanel } from './ImagesPanel';
+import type { Mock } from 'vitest';
+import ImagesPanel from './ImagesPanel';
 import { ScriptSelectionProvider } from '../../contexts/ScriptSelectionContext';
+import * as imageGenerationModule from '../../hooks/useImageGeneration';
+import * as scriptSelectionModule from '../../contexts/ScriptSelectionContext';
+import * as userServiceModule from '../../services/userService';
 
 // Mock the hooks
-jest.mock('../../hooks/useImageGeneration', () => ({
-  useImageGeneration: jest.fn()
+vi.mock('../../hooks/useImageGeneration', () => ({
+  useImageGeneration: vi.fn()
 }));
 
-jest.mock('../../contexts/ScriptSelectionContext', () => ({
-  ...jest.requireActual('../../contexts/ScriptSelectionContext'),
-  useScriptSelection: jest.fn()
-}));
+vi.mock('../../contexts/ScriptSelectionContext', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>(
+    '../../contexts/ScriptSelectionContext'
+  );
+  return {
+    ...actual,
+    useScriptSelection: vi.fn()
+  };
+});
 
 // Mock userService
-jest.mock('../../services/userService', () => ({
+vi.mock('../../services/userService', () => ({
   userService: {
-    getCharactersByChapter: jest.fn()
+    getCharactersByChapter: vi.fn()
   }
 }));
 
+const mockUserService = userServiceModule.userService as unknown as {
+  getCharactersByChapter: Mock;
+};
+
 describe('ImagesPanel script_id filtering', () => {
-  const mockUseImageGeneration = require('../../hooks/useImageGeneration').useImageGeneration;
-  const mockUseScriptSelection = require('../../contexts/ScriptSelectionContext').useScriptSelection;
+  const mockUseImageGeneration = imageGenerationModule.useImageGeneration as unknown as Mock;
+  const mockUseScriptSelection = scriptSelectionModule.useScriptSelection as unknown as Mock;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('filters scene images by script_id when backend returns script_id', () => {
@@ -63,17 +76,17 @@ describe('ImagesPanel script_id filtering', () => {
       isLoading: false,
       generatingScenes: new Set(),
       generatingCharacters: new Set(),
-      loadImages: jest.fn(),
-      generateSceneImage: jest.fn(),
-      generateCharacterImage: jest.fn(),
-      regenerateImage: jest.fn(),
-      deleteImage: jest.fn(),
-      generateAllSceneImages: jest.fn(),
-      generateAllCharacterImages: jest.fn()
+      loadImages: vi.fn(),
+      generateSceneImage: vi.fn(),
+      generateCharacterImage: vi.fn(),
+      regenerateImage: vi.fn(),
+      deleteImage: vi.fn(),
+      generateAllSceneImages: vi.fn(),
+      generateAllCharacterImages: vi.fn()
     });
 
     // Mock userService
-    require('../../services/userService').userService.getCharactersByChapter.mockResolvedValue([]);
+    mockUserService.getCharactersByChapter.mockResolvedValue([]);
 
     render(
       <ScriptSelectionProvider>
@@ -125,20 +138,20 @@ describe('ImagesPanel script_id filtering', () => {
       isLoading: false,
       generatingScenes: new Set(),
       generatingCharacters: new Set(),
-      loadImages: jest.fn(),
-      generateSceneImage: jest.fn(),
-      generateCharacterImage: jest.fn(),
-      regenerateImage: jest.fn(),
-      deleteImage: jest.fn(),
-      deleteGenerations: jest.fn(),
-      deleteAllSceneGenerations: jest.fn(),
-      generateAllSceneImages: jest.fn(),
-      generateAllCharacterImages: jest.fn(),
-      setCharacterImage: jest.fn()
+      loadImages: vi.fn(),
+      generateSceneImage: vi.fn(),
+      generateCharacterImage: vi.fn(),
+      regenerateImage: vi.fn(),
+      deleteImage: vi.fn(),
+      deleteGenerations: vi.fn(),
+      deleteAllSceneGenerations: vi.fn(),
+      generateAllSceneImages: vi.fn(),
+      generateAllCharacterImages: vi.fn(),
+      setCharacterImage: vi.fn()
     });
 
     // Mock userService
-    require('../../services/userService').userService.getCharactersByChapter.mockResolvedValue([]);
+    mockUserService.getCharactersByChapter.mockResolvedValue([]);
 
     render(
       <ScriptSelectionProvider>
@@ -180,17 +193,17 @@ describe('ImagesPanel script_id filtering', () => {
       isLoading: false,
       generatingScenes: new Set(),
       generatingCharacters: new Set(),
-      loadImages: jest.fn(),
-      generateSceneImage: jest.fn(),
-      generateCharacterImage: jest.fn(),
-      regenerateImage: jest.fn(),
-      deleteImage: jest.fn(),
-      generateAllSceneImages: jest.fn(),
-      generateAllCharacterImages: jest.fn()
+      loadImages: vi.fn(),
+      generateSceneImage: vi.fn(),
+      generateCharacterImage: vi.fn(),
+      regenerateImage: vi.fn(),
+      deleteImage: vi.fn(),
+      generateAllSceneImages: vi.fn(),
+      generateAllCharacterImages: vi.fn()
     });
 
     // Mock userService
-    require('../../services/userService').userService.getCharactersByChapter.mockResolvedValue([]);
+    mockUserService.getCharactersByChapter.mockResolvedValue([]);
 
     render(
       <ScriptSelectionProvider>
@@ -217,7 +230,7 @@ describe('ImagesPanel script_id filtering', () => {
       });
 
       // Mock hook to return images with IDs
-      const mockDeleteGenerations = jest.fn().mockResolvedValue({ success: true, message: 'Deleted successfully' });
+      const mockDeleteGenerations = vi.fn().mockResolvedValue({ success: true, message: 'Deleted successfully' });
       mockUseImageGeneration.mockReturnValue({
         sceneImages: {
           1: {
@@ -243,20 +256,20 @@ describe('ImagesPanel script_id filtering', () => {
         isLoading: false,
         generatingScenes: new Set(),
         generatingCharacters: new Set(),
-        loadImages: jest.fn(),
-        generateSceneImage: jest.fn(),
-        generateCharacterImage: jest.fn(),
-        regenerateImage: jest.fn(),
-        deleteImage: jest.fn(),
+        loadImages: vi.fn(),
+        generateSceneImage: vi.fn(),
+        generateCharacterImage: vi.fn(),
+        regenerateImage: vi.fn(),
+        deleteImage: vi.fn(),
         deleteGenerations: mockDeleteGenerations,
-        deleteAllSceneGenerations: jest.fn(),
-        generateAllSceneImages: jest.fn(),
-        generateAllCharacterImages: jest.fn(),
-        setCharacterImage: jest.fn()
+        deleteAllSceneGenerations: vi.fn(),
+        generateAllSceneImages: vi.fn(),
+        generateAllCharacterImages: vi.fn(),
+        setCharacterImage: vi.fn()
       });
 
       // Mock userService
-      require('../../services/userService').userService.getCharactersByChapter.mockResolvedValue([]);
+      mockUserService.getCharactersByChapter.mockResolvedValue([]);
 
       const { user } = render(
         <ScriptSelectionProvider>
@@ -306,7 +319,7 @@ describe('ImagesPanel script_id filtering', () => {
       });
 
       // Mock hook to return images
-      const mockDeleteAllSceneGenerations = jest.fn().mockResolvedValue({ success: true, message: 'Deleted all successfully' });
+      const mockDeleteAllSceneGenerations = vi.fn().mockResolvedValue({ success: true, message: 'Deleted all successfully' });
       mockUseImageGeneration.mockReturnValue({
         sceneImages: {
           1: {
@@ -323,20 +336,20 @@ describe('ImagesPanel script_id filtering', () => {
         isLoading: false,
         generatingScenes: new Set(),
         generatingCharacters: new Set(),
-        loadImages: jest.fn(),
-        generateSceneImage: jest.fn(),
-        generateCharacterImage: jest.fn(),
-        regenerateImage: jest.fn(),
-        deleteImage: jest.fn(),
-        deleteGenerations: jest.fn(),
+        loadImages: vi.fn(),
+        generateSceneImage: vi.fn(),
+        generateCharacterImage: vi.fn(),
+        regenerateImage: vi.fn(),
+        deleteImage: vi.fn(),
+        deleteGenerations: vi.fn(),
         deleteAllSceneGenerations: mockDeleteAllSceneGenerations,
-        generateAllSceneImages: jest.fn(),
-        generateAllCharacterImages: jest.fn(),
-        setCharacterImage: jest.fn()
+        generateAllSceneImages: vi.fn(),
+        generateAllCharacterImages: vi.fn(),
+        setCharacterImage: vi.fn()
       });
 
       // Mock userService
-      require('../../services/userService').userService.getCharactersByChapter.mockResolvedValue([]);
+      mockUserService.getCharactersByChapter.mockResolvedValue([]);
 
       const { user } = render(
         <ScriptSelectionProvider>

@@ -23,16 +23,16 @@ describe('CharacterCard - Add Archetype Modal', () => {
     character: mockCharacter,
     isGeneratingImage: false,
     isSelected: false,
-    onToggleSelect: jest.fn(),
-    onUpdate: jest.fn().mockResolvedValue(undefined),
-    onDelete: jest.fn(),
-    onGenerateImage: jest.fn(),
-    onRegenerateImage: jest.fn(),
-    onViewImage: jest.fn(),
+    onToggleSelect: vi.fn(),
+    onUpdate: vi.fn().mockResolvedValue(undefined),
+    onDelete: vi.fn(),
+    onGenerateImage: vi.fn(),
+    onRegenerateImage: vi.fn(),
+    onViewImage: vi.fn(),
   };
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   test('renders character card with archetypes section when editing', () => {

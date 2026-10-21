@@ -13,11 +13,11 @@ const SafeComponent = () => <div>Safe content</div>;
 describe('ErrorBoundary', () => {
   beforeEach(() => {
     // Suppress console.error for expected error throws
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('renders children when there is no error', () => {
@@ -58,7 +58,7 @@ describe('ErrorBoundary', () => {
   });
 
   it('calls onError callback when error occurs', () => {
-    const onErrorMock = jest.fn();
+    const onErrorMock = vi.fn();
 
     render(
       <ErrorBoundary onError={onErrorMock}>
