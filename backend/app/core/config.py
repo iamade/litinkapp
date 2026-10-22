@@ -398,6 +398,17 @@ class Settings(BaseSettings):
     #     case_sensitive = True
     #     extra = "ignore"
 
+    # KAN-498: admin seeding must be explicit. This repository carries NO
+    # default admin credentials; provisioning requires operator-supplied values.
+    # When seeding is enabled but the values are absent, startup fails closed.
+    ADMIN_SEED_ENABLED: bool = False
+    ADMIN_SEED_SUPERADMIN_EMAIL: str = ""
+    ADMIN_SEED_SUPERADMIN_PASSWORD: str = ""
+    ADMIN_SEED_SUPERADMIN_SECURITY_ANSWER: str = ""
+    ADMIN_SEED_ADMIN_EMAIL: str = ""
+    ADMIN_SEED_ADMIN_PASSWORD: str = ""
+    ADMIN_SEED_ADMIN_SECURITY_ANSWER: str = ""
+
     def minio_env_check(self) -> None:
         """
         KAN-402: warn loudly when a staging/production environment uses MinIO
