@@ -1,4 +1,6 @@
 import asyncio
+import os
+
 import httpx
 import sys
 import json
@@ -9,9 +11,12 @@ API_URL = "http://localhost:8001"
 API_V1_STR = "/api/v1"
 BASE_URL = f"{API_URL}{API_V1_STR}"
 
-# Test Credentials (ensure these exist or use registration)
-TEST_EMAIL = "test_creator@example.com"
-TEST_PASSWORD = "password123"
+# KAN-500: no credential literal. This script POSTs to /auth/login, so a
+# committed password here is a usable credential against whatever environment
+# it is pointed at. Values come from the environment; when they are absent the
+# auth probe SKIPS instead of falling back to a known password.
+TEST_EMAIL = os.environ.get("VERIFY_BACKEND_EMAIL", "").strip() or None
+TEST_PASSWORD = os.environ.get("VERIFY_BACKEND_PASSWORD", "").strip() or None
 
 
 async def check_health():
@@ -33,6 +38,13 @@ async def check_health():
 
 
 async def test_auth():
+    if not TEST_EMAIL or not TEST_PASSWORD:
+        print(
+            "\nSkipping auth test: set VERIFY_BACKEND_EMAIL and "
+            "VERIFY_BACKEND_PASSWORD. This script carries no default "
+            "credentials (KAN-500)."
+        )
+        return None
     print(f"\nTesting Auth at {BASE_URL}/auth/login...")
     async with httpx.AsyncClient() as client:
         try:
