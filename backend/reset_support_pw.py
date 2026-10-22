@@ -1,27 +1,22 @@
-"""Reset the support account password.
+"""Reset the support account password with an explicit runtime confirmation.
 
-KAN-499: this script previously shipped a literal ``[removed-credential-derived-hash] hash and
-wrote it straight to the live support@litinkai.com row. A committed hash is a
-committed credential - anyone with repo access could authenticate as support,
-and rotating the password in the database could never revoke the literal
-because the literal is only invalid once the row no longer matches it.
-
-Now the script carries no credential at all. It reads the new password from
-the environment, hashes it at runtime with the application's own hasher, and
-requires an explicit confirmation flag because it writes to a live account.
+An earlier script could install a committed password hash. Its plaintext and
+current validity are unknown. Removing that code neither rotates a credential
+nor purges repository history.
 
 Usage:
-    SUPPORT_PW_RESET_PASSWORD=... python -m backend.reset_support_pw --confirm
+    cd backend
+    Supply SUPPORT_PW_RESET_PASSWORD securely in the runtime environment.
+    python reset_support_pw.py --confirm
 """
 import argparse
 import asyncio
 import os
 import sys
 
-from sqlalchemy import text
-
 TARGET_EMAIL = "support@litinkai.com"
 ENV_VAR = "SUPPORT_PW_RESET_PASSWORD"
+FAILURE_MESSAGE = "Support password reset failed."
 
 
 async def main() -> int:
@@ -49,22 +44,25 @@ async def main() -> int:
         )
         return 2
 
-    # Imported lazily so --help works without app settings/bindings.
-    from app.auth.utils import generate_password_hash
-    from app.core.database import async_session
+    try:
+        # Import lazily so import and --help need no application/DB configuration.
+        from sqlalchemy import text
+        from app.auth.utils import generate_password_hash
+        from app.core.database import async_session
 
-    hashed = generate_password_hash(password)
+        hashed = generate_password_hash(password)
+        async with async_session() as session:
+            result = await session.exec(
+                text(
+                    'UPDATE "user" SET hashed_password = :h WHERE email = :e'
+                ).bindparams(h=hashed, e=TARGET_EMAIL)
+            )
+            await session.commit()
+            rowcount = getattr(result, "rowcount", None)
+    except Exception:
+        print(FAILURE_MESSAGE, file=sys.stderr)
+        return 1
 
-    async with async_session() as s:
-        r = await s.exec(
-            text(
-                'UPDATE "user" SET hashed_password = :h WHERE email = :e'
-            ).bindparams(h=hashed, e=TARGET_EMAIL)
-        )
-        await s.commit()
-        rowcount = getattr(r, "rowcount", None)
-
-    # Never print the password or the hash; only whether a row moved.
     print(f"updated {rowcount} row(s) for {TARGET_EMAIL}")
     return 0 if rowcount else 1
 
