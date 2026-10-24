@@ -2,17 +2,14 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ErrorBoundary } from './ErrorBoundary';
 
-// Component that throws an error for testing
 const ThrowError = () => {
   throw new Error('Test error');
 };
 
-// Component that doesn't throw an error
 const SafeComponent = () => <div>Safe content</div>;
 
 describe('ErrorBoundary', () => {
   beforeEach(() => {
-    // Suppress console.error for expected error throws
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -73,41 +70,22 @@ describe('ErrorBoundary', () => {
   });
 
   it('resets error state when Try Again button is clicked', () => {
-    const SafeAfterReset = () => {
-      const [shouldThrow, setShouldThrow] = React.useState(true);
-
-      React.useEffect(() => {
-        if (!shouldThrow) {
-          // This will be called after reset, so we don't throw
-        }
-      }, [shouldThrow]);
-
-      if (shouldThrow) {
-        throw new Error('Test error');
-      }
-
-      return (
-        <div>
-          <button onClick={() => setShouldThrow(true)}>Throw again</button>
-          <div>Recovered content</div>
-        </div>
-      );
+    let shouldThrow = true;
+    const ControlledChild = () => {
+      if (shouldThrow) throw new Error('Test error');
+      return <div>Recovered content</div>;
     };
+    const boundary = (child: React.ReactNode) => <ErrorBoundary>{child}</ErrorBoundary>;
 
-    render(
-      <ErrorBoundary>
-        <SafeAfterReset />
-      </ErrorBoundary>
-    );
-
-    // Should show error UI initially
+    const view = render(boundary(<ControlledChild />));
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
 
-    // Click try again
+    shouldThrow = false;
+    view.rerender(boundary(<ControlledChild />));
     fireEvent.click(screen.getByText('Try again'));
 
-    // Should show recovered content
     expect(screen.getByText('Recovered content')).toBeInTheDocument();
+    expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
   });
 
   it('renders custom fallback when provided', () => {
