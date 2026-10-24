@@ -33,6 +33,10 @@ class HealthCheck:
         self._cache_status: Optional[Dict[str, Any]] = None
         self._last_check_time: Optional[datetime] = None
 
+        # KAN-494: informational only — broker reachability never becomes
+        # the celery health value.
+        self._celery_broker_reachable: Optional[bool] = None
+
     async def validate_dependencies(
         self, service_name: str, depends_on: list[str]
     ) -> None:
@@ -94,20 +98,53 @@ class HealthCheck:
             logger.error(f"Postgres Database health check failed: {e}")
             return False
 
+    def _celery_broker_name(self) -> str:
+        """Name the configured broker for logs without ever logging the
+        broker URL itself (it may embed credentials)."""
+        try:
+            url = str(celery_app.conf.broker_url or "")
+        except Exception:
+            url = ""
+        scheme = url.partition("://")[0].strip().lower()
+        known = {
+            "amqp": "RabbitMQ (amqp)",
+            "amqps": "RabbitMQ (amqps)",
+            "redis": "Redis",
+            "rediss": "Redis (rediss)",
+            "memory": "in-memory transport",
+        }
+        if scheme in known:
+            return known[scheme]
+        return "celery broker" + (f" ({scheme})" if scheme else "")
+
     async def check_celery(self) -> bool:
         try:
             inspect = celery_app.control.inspect()
             workers = inspect.ping()
 
             if not workers:
+                # KAN-494: an empty ping means no celery workers answered;
+                # that is UNHEALTHY even when the broker itself is reachable.
+                # Broker reachability is recorded as an informational field
+                # only and never becomes the celery health value.
+                broker_name = self._celery_broker_name()
                 conn = celery_app.connection()
                 try:
                     conn.ensure_connection(max_retries=3)
-                    logger.warning("No celery workers found, but Rabbitmq is reachable")
-                    self._last_check["celery"] = datetime.now(timezone.utc)
-                    return True
+                    self._celery_broker_reachable = True
+                    logger.warning(
+                        f"No celery workers found; {broker_name} broker is reachable"
+                    )
+                except Exception as conn_error:
+                    self._celery_broker_reachable = False
+                    logger.warning(
+                        f"No celery workers found; {broker_name} broker unreachable: {conn_error}"
+                    )
                 finally:
                     conn.close()
+
+                self._last_check["celery"] = datetime.now(timezone.utc)
+                return False
 
             self._last_check["celery"] = datetime.now(timezone.utc)
             return True
