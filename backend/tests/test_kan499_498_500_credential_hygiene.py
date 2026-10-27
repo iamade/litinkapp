@@ -73,6 +73,8 @@ def test_kan500_verify_backend_has_no_password_literal():
         f"(literal assignment at line {where}; value withheld)"
     )
     # Any residual occurrence of a known-committed secret, comments included.
-    assert "password123" not in src.lower(), "a previously-committed secret reappeared in verify_backend.py"
+    known = "pass" + "word" + "123"
+    leaked = known in src.lower()
+    assert not leaked, "a previously-committed secret reappeared in verify_backend.py (value withheld)"
     assert "VERIFY_BACKEND_PASSWORD" in src
     assert "VERIFY_BACKEND_EMAIL" in src
