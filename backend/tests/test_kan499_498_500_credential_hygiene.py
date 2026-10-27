@@ -57,7 +57,22 @@ def test_kan498_seeder_skips_accounts_without_secret(monkeypatch):
 
 
 def test_kan500_verify_backend_has_no_password_literal():
+    import re
     src = _read("verify_backend.py")
-    assert 'TEST_PASSWORD = "password123"' not in src
+    # Shape match, not an exact string: any literal assigned to TEST_PASSWORD
+    # fails, whatever the quote style or spacing. An exact-match assertion was
+    # proven bypassable by a same-value single-quoted or reformatted literal.
+    assignment = re.search(r"TEST_PASSWORD\s*=\s*['\"][^'\"]*['\"]", src)
+    # Assert on a BOOLEAN, never on the match object: reporting a re.Match lets
+    # pytest echo match='<the literal>' in its repr, which writes the secret into
+    # CI output and logs and reproduces the leak this guard exists to stop.
+    is_literal = assignment is not None
+    where = (src[: assignment.start()].count("\n") + 1) if assignment else 0
+    assert not is_literal, (
+        f"verify_backend.py must not assign a string literal to TEST_PASSWORD "
+        f"(literal assignment at line {where}; value withheld)"
+    )
+    # Any residual occurrence of a known-committed secret, comments included.
+    assert "password123" not in src.lower(), "a previously-committed secret reappeared in verify_backend.py"
     assert "VERIFY_BACKEND_PASSWORD" in src
     assert "VERIFY_BACKEND_EMAIL" in src
