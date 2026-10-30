@@ -109,3 +109,13 @@ def test_kan331_generic_roles_still_filtered_with_populated_map():
 
     assert characters == ["Captain Ahab"]
     assert character_ids == [str(ahab_id)]
+
+
+def test_kan331_unmatched_speakers_dedupe_by_normalized_display_name():
+    """Repeated script-only speakers must remain one warning-state pill."""
+    script_lines = ["ELIJAH", "ELIJAH (V.O.)", "  ELIJAH  "]
+
+    characters, character_ids = _extract_script_characters_with_ids(script_lines, {})
+
+    assert characters == ["Elijah"]
+    assert character_ids == [""]
