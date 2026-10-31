@@ -51,6 +51,16 @@ class TestFrontMatterLabelClassifier:
                 got = svc._classify_spine_item(title, "", n, _words(n))
                 assert got == "front_matter", (title, n, got)
 
+    def test_prologue_label_classifies_front_matter(self):
+        # KAN-226 part 2 (LC ruling 12:57Z): the section-level sets at :423 and
+        # :1253 already contain 'prologue' while the spine-item set the save
+        # loop consults does not, so the same book classifies prologue as
+        # front matter on one path and as a chapter on another.
+        svc = make_service()
+        for title in ("Prologue", "prologue", "PROLOGUE"):
+            got = svc._classify_spine_item(title, "", 300, _words(300))
+            assert got == "front_matter", (title, got)
+
     def test_real_chapter_titles_still_chapter(self):
         svc = make_service()
         for title in ("Chapter 1", "Chapter 17", "Chapter LI", "Complete Story"):
