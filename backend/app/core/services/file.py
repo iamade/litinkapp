@@ -3243,6 +3243,13 @@ class FileService:
             "etymology", "extracts", "extract", "epigraph",
             "preface", "foreword", "introduction", "dedication",
             "acknowledgments", "acknowledgements",
+            # KAN-226: the preview emitters set title="Front Matter" for the
+            # pre-body aggregate (file.py hierarchical/flat/recovery paths),
+            # but the frontend save call posts no content_type, so the save
+            # loop re-derives it here. Without this label the product's own
+            # front-matter row persisted as a real chapter and consumed a
+            # chapter number.
+            "front matter",
         }
         BACK_MATTER_TITLES = {
             "epilogue", "afterword", "appendix",
