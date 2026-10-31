@@ -129,4 +129,7 @@ class TestKan226GapBSavePathReDerivesContentType:
         import inspect
 
         source = inspect.getsource(FileService.confirm_book_structure)
-        assert "chapter_number = chapter_order" in source
+        # KAN-226 (LC 2026-10-31 06:54Z): the persisted number is
+        # heading-derived, falling back to sequential order.
+        assert "_derive_heading_chapter_number" in source
+        assert "chapter_number = (" in source

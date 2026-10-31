@@ -6972,14 +6972,21 @@ class FileService:
                 # real chapter. A value the client does send is honoured.
                 content_type = self._resolve_content_type(ch)
                 # Only real chapters get a chapter number. KAN-226: front and
-                # back matter must not consume one, and the real chapters
-                # number 1..N. A client-supplied number (heading-derived or
-                # positional) is not authoritative for the persisted row.
+                # back matter must not consume one, and the persisted number
+                # is the heading-derived number ("CHAPTER LI" -> 51), not the
+                # positional index the client happened to send. A heading with
+                # no number falls back to sequential numbering over real
+                # chapters.
                 if content_type != "chapter":
                     chapter_number = None
                 else:
                     chapter_order += 1
-                    chapter_number = chapter_order
+                    heading_number = self._derive_heading_chapter_number(
+                        ch.get("title", "")
+                    )
+                    chapter_number = (
+                        heading_number if heading_number is not None else chapter_order
+                    )
 
                 chapter = Chapter(
                     book_id=book_uuid,
@@ -7087,6 +7094,35 @@ class FileService:
         except Exception:
             derived = "chapter"
         return derived if derived in VALID_TYPES else "chapter"
+
+    def _derive_heading_chapter_number(self, title: str) -> Optional[int]:
+        """KAN-226: derive the chapter number from the heading text.
+
+        The persisted chapter_number must be the heading-derived number
+        (e.g. "CHAPTER LI" -> 51), not the positional index the client
+        happened to send. Returns None when the heading carries no number.
+        """
+        raw = str(title or "").strip()
+        if not raw:
+            return None
+
+        match = re.match(
+            r"(?i)^(?:chapter|chap|ch)\.?\s*(\d+|[ivxlcdm]+)\b", raw
+        )
+        if not match:
+            match = re.match(r"^\s*(\d{1,3})[\.\s]", raw)
+        if not match:
+            return None
+
+        token = match.group(1).strip()
+        if token.isdigit():
+            value = int(token)
+        else:
+            try:
+                value = self.structure_detector._roman_to_int(token.upper())
+            except Exception:
+                return None
+        return value if value and 1 <= value <= 500 else None
 
     def _build_flat_preview_chapters(
         self,
