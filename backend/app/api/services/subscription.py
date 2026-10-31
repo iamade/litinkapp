@@ -469,6 +469,15 @@ class SubscriptionManager:
             subscription.cancel_at_period_end = False
             subscription.cancelled_at = datetime.now(timezone.utc)
 
+        # KAN-503: freeze the credit balance at cancellation — immediately
+        # for an immediate cancel, else at the paid period end.
+        await self._freeze_tier_grants(
+            subscription.user_id,
+            datetime.now(timezone.utc)
+            if immediate
+            else subscription.current_period_end,
+        )
+
         self.session.add(subscription)
 
         # Log history
@@ -551,6 +560,10 @@ class SubscriptionManager:
             subscription.tier = SubscriptionTier.FREE
             subscription.cancel_at_period_end = False
             subscription.cancelled_at = datetime.now(timezone.utc)
+            # KAN-503: freeze the credit balance at the paid period end.
+            await self._freeze_tier_grants(
+                subscription.user_id, subscription.current_period_end
+            )
         subscription.updated_at = datetime.now(timezone.utc)
         self.session.add(subscription)
         self.session.add(
@@ -863,6 +876,82 @@ class SubscriptionManager:
                 f"KAN-410: payment confirmation email failed for user {user_id}"
             )
 
+    async def _get_live_tier_grants(self, user_id: uuid.UUID) -> list:
+        """KAN-503: live (non-expired) tier grants for a user."""
+        now = datetime.now(timezone.utc)
+        stmt = select(CreditGrant).where(
+            CreditGrant.user_id == user_id,
+            CreditGrant.grant_type.in_(
+                [GrantType.PURCHASE.value, GrantType.FREE_TIER.value]
+            ),
+            CreditGrant.expires_at > now,
+        )
+        result = await self.session.exec(stmt)
+        return list(result.all())
+
+    async def _adjust_tier_grant(
+        self,
+        user_id: uuid.UUID,
+        old_tier,
+        new_tier,
+    ) -> bool:
+        """KAN-503: a tier change ADJUSTS the existing live grant by the delta
+        between the two tiers' grant amounts (TIER_CREDIT_GRANTS_BY_ENUM)
+        instead of stacking a new grant on top. Downgrades clamp at 0; no cash
+        proration is invented. Returns True when an existing grant was
+        adjusted (or no adjustment is needed), False when the caller should
+        create the first grant.
+        """
+        new_amount = TIER_CREDIT_GRANTS_BY_ENUM.get(new_tier.value) or 0
+        old_amount = (
+            (TIER_CREDIT_GRANTS_BY_ENUM.get(old_tier.value) or 0)
+            if getattr(old_tier, "value", None)
+            else 0
+        )
+        if new_amount <= 0 or new_amount == old_amount:
+            return True
+        live = await self._get_live_tier_grants(user_id)
+        if not live:
+            return False
+        delta = new_amount - old_amount
+        primary = live[0]
+        primary.credits_remaining = max(0, primary.credits_remaining + delta)
+        self.session.add(primary)
+        logger.info(
+            "KAN-503: adjusted tier grant for %s from %s(%d) to %s(%d), delta %d",
+            user_id,
+            getattr(old_tier, "value", old_tier),
+            old_amount,
+            new_tier.value,
+            new_amount,
+            delta,
+        )
+        return True
+
+    async def _freeze_tier_grants(self, user_id: uuid.UUID, freeze_at) -> None:
+        """KAN-503: cancellation FREEZES the credit balance by capping each
+        live tier grant's expires_at at the paid period end (or the cancel
+        time for an immediate cancel). The balance stays usable through the
+        period the user paid for, then lapses, and never accrues past the
+        cancellation."""
+        now = datetime.now(timezone.utc)
+        cap = freeze_at or now
+        if cap.tzinfo is None:
+            cap = cap.replace(tzinfo=timezone.utc)
+        stmt = select(CreditGrant).where(
+            CreditGrant.user_id == user_id,
+            CreditGrant.grant_type.in_(
+                [GrantType.PURCHASE.value, GrantType.FREE_TIER.value]
+            ),
+            CreditGrant.expires_at > now,
+        )
+        result = await self.session.exec(stmt)
+        for grant in result.all():
+            if grant.expires_at > cap:
+                grant.expires_at = cap
+                self.session.add(grant)
+        logger.info("KAN-503: froze tier grants for %s at %s", user_id, cap)
+
     async def handle_subscription_webhook(
         self, event_type: str, event_data: Dict[str, Any]
     ):
@@ -886,6 +975,7 @@ class SubscriptionManager:
             )
             result = await self.session.exec(statement)
             subscription = result.first()
+            old_tier = subscription.tier if subscription else None
 
             if not subscription:
                 subscription = UserSubscription(
@@ -915,8 +1005,11 @@ class SubscriptionManager:
             logger.info(f"Subscription activated for user {user_id}: {tier}")
 
             # KAN-314: grant tier credits on subscription activation
+            # KAN-503: a tier change adjusts the existing live grant instead
+            # of stacking a new one; only the first grant is created.
+            adjusted = await self._adjust_tier_grant(user_id, old_tier, tier)
             credit_amount = TIER_CREDIT_GRANTS_BY_ENUM.get(tier.value)
-            if credit_amount and credit_amount > 0:
+            if not adjusted and credit_amount and credit_amount > 0:
                 grant_type = (
                     GrantType.FREE_TIER.value
                     if tier == SubscriptionTier.FREE
@@ -936,7 +1029,7 @@ class SubscriptionManager:
                     f"KAN-314: granted {credit_amount} credits to user {user_id} "
                     f"for tier {tier.value}"
                 )
-            else:
+            elif not adjusted:
                 logger.warning(
                     f"KAN-314: no credit grant amount found for tier {tier.value}, "
                     f"user {user_id} — skipping credit grant"
