@@ -11,6 +11,26 @@ actually receives, i.e. after response_model serialization:
 Acceptance (LC gate ruling, ratified 2026-09-18): non-null accent,
 voice_gender and voice_characteristics in create AND update response JSON.
 """
+import os
+
+# Test-safe env BEFORE app imports (mirrors backend/tests/test_kan470_471_auth_error_hardening.py).
+# The create/update routes reach the ModelLabs image service and the OpenAI
+# client; without both keys the ASGI request 500s on the provider guard
+# instead of exercising the voice-field response surface.
+os.environ.setdefault("ENVIRONMENT", "staging")
+os.environ.setdefault("JWT_SECRET_KEY", "x" * 48)
+os.environ.setdefault("OPENAI_API_KEY", "sk-dummy")
+os.environ.setdefault("MODELSLAB_API_KEY", "dummy")
+os.environ.setdefault("MAIL_FROM", "noreply@example.com")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("STRIPE_SECRET_KEY", "***")
+os.environ.setdefault("STRIPE_PUBLISHABLE_KEY", "pk_test_dummy")
+for _k in [
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
+    "REDIS_URL", "CELERY_BROKER_URL",
+]:
+    os.environ.setdefault(_k, "dummy" if "PORT" not in _k else "0")
+
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
