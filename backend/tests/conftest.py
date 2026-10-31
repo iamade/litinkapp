@@ -6,6 +6,22 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+# KAN-226 / order-dependence PIN: the provider-key defaults must exist BEFORE
+# any app import. app/core/config.py builds the settings singleton at import
+# time (config.py:456) and app/core/services/modelslab_v7_image.py:16 reads
+# that FROZEN snapshot - not os.environ. A test module that imports app
+# first (e.g. test_kan226_content_type_persistence.py, which pulls in
+# app.core.services.file -> app.core.config) therefore creates the singleton
+# with MODELSLAB_API_KEY empty, and a later setdefault in another test file
+# (e.g. test_kan501_ownership_uuid_compare.py:58) is too late: every
+# CharacterService() construction then raises
+# ValueError("MODELSLAB_API_KEY is required"). The result depended on which
+# file pytest collected first. pytest imports conftest BEFORE any test
+# module, so setting the defaults here makes the outcome independent of file
+# order. Dummy literals only - no real credentials, no provider call.
+os.environ.setdefault("MODELSLAB_API_KEY", "dummy")
+os.environ.setdefault("OPENAI_API_KEY", "sk-dummy")
+
 # Ensure imports like `from app...` work when running pytest from backend/
 BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if BACKEND_ROOT not in sys.path:
