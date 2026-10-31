@@ -496,17 +496,27 @@ def get_available_script_styles() -> dict:
 
 async def enhance_with_plot_context(
     session: AsyncSession,
-    user_id: str,
-    book_id: str,
+    user_id: uuid.UUID,
+    book_id: Optional[uuid.UUID],
     chapter_content: str,
     custom_logline: Optional[str] = None,
 ) -> dict:
-    """Enhanced plot context integration for script generation"""
+    """Enhanced plot context integration for script generation.
+
+    KAN-167: a NULL book_id must not reach a `column == None` comparison -
+    SQLAlchemy renders that as `IS NULL`, which matches any plot with an
+    unset book_id instead of returning no context.
+    """
     try:
         plot_service = PlotService(session)
-        plot_overview = await plot_service.get_plot_overview(
-            user_id=user_id, book_id=book_id
-        )
+        # KAN-167: a NULL book_id must never reach a `column == None`
+        # comparison - SQLAlchemy renders that as `IS NULL`, which matches
+        # any plot with an unset book_id instead of returning no context.
+        plot_overview = None
+        if book_id is not None:
+            plot_overview = await plot_service.get_plot_overview(
+                user_id=user_id, book_id=book_id
+            )
 
         if not plot_overview:
             print(f"[PlotService] No plot found with book_id={book_id}")
@@ -514,7 +524,14 @@ async def enhance_with_plot_context(
             # If this book_id belongs to a Project, retry the lookup by project_id.
             from app.projects.models import Project
 
-            stmt = select(Project).where(Project.book_id == book_id)
+            # KAN-167: the Creator-mode caller may already have resolved
+            # book_id to a Project.id, while Project.book_id is a books.id
+            # FK. The old query tested only the FK interpretation, so when
+            # the caller passed a Project.id the fallback silently died.
+            # Match either interpretation in a single round trip.
+            stmt = select(Project).where(
+                or_(Project.id == book_id, Project.book_id == book_id)
+            )
             result = await session.exec(stmt)
             project = result.first()
             if project:
