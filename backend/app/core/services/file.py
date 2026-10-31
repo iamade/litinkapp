@@ -6783,21 +6783,11 @@ class FileService:
             )
 
             # Format individual chapters for flat structure
-            formatted_chapters = []
-            for i, ch in enumerate(all_chapters):
-                if not isinstance(ch, dict):
-                    continue
-
-                chapter_data = {
-                    "id": f"chapter_{i + 1}",
-                    "book_id": book_id_to_update,
-                    "chapter_number": ch.get("chapter_number", ch.get("number", i + 1)),
-                    "title": ch.get("title", f"Chapter {i + 1}"),
-                    "content": ch.get("content", ""),
-                    "summary": ch.get("summary", ""),
-                    "order_index": i,
-                }
-                formatted_chapters.append(chapter_data)
+            # KAN-226 GAP A: the flat preview must carry content_type, and
+            # chapter_number must be null for front/back matter.
+            formatted_chapters = self._build_flat_preview_chapters(
+                all_chapters, book_id_to_update
+            )
 
             structure_data = {
                 "id": book_id_to_update,
@@ -6940,6 +6930,7 @@ class FileService:
             # Build sections (if present)
             section_id_map: Dict[str, uuid.UUID] = {}
             chapter_order = 0
+            entry_index = 0
             section_order = 0
 
             # We need to commit deletions before insertions?
@@ -6968,32 +6959,37 @@ class FileService:
                     continue
 
                 ch = entry["data"]
-                chapter_order += 1
+                entry_index += 1
                 section_id = None
                 section_key = entry.get("section_key")
                 if section_key:
                     section_id = section_id_map.get(section_key)
 
-                # KAN-367 v3: Preserve content_type from detection
-                content_type = ch.get("content_type", "chapter")
-                chapter_number = ch.get("chapter_number") or ch.get("number")
-                # Only set chapter_number for actual chapters
+                # KAN-226 GAP B: re-derive content_type server-side instead of
+                # defaulting to "chapter" (old file.py:6978). The client may
+                # omit the key entirely - the flat preview used to drop it -
+                # and a front/back-matter item would then be persisted as a
+                # real chapter. A value the client does send is honoured.
+                content_type = self._resolve_content_type(ch)
+                # Only real chapters get a chapter number. KAN-226: front and
+                # back matter must not consume one, and the real chapters
+                # number 1..N. A client-supplied number (heading-derived or
+                # positional) is not authoritative for the persisted row.
                 if content_type != "chapter":
                     chapter_number = None
                 else:
-                    # Use sequential numbering if not provided
-                    if chapter_number is None:
-                        chapter_number = chapter_order
+                    chapter_order += 1
+                    chapter_number = chapter_order
 
                 chapter = Chapter(
                     book_id=book_uuid,
                     section_id=section_id,
                     chapter_number=chapter_number,
-                    title=ch.get("title", f"Chapter {chapter_order}"),
+                    title=ch.get("title", f"Chapter {entry_index}"),
                     content=self._clean_text_content(ch.get("content", "")),
                     summary=self._clean_text_content(ch.get("summary", "")),
                     content_type=content_type,
-                    order_index=chapter_order,
+                    order_index=entry_index,
                 )
                 session.add(chapter)
                 await session.flush()
@@ -7068,6 +7064,73 @@ class FileService:
             yield f"Error saving structure: {str(e)}"
             print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
             raise e
+
+    def _resolve_content_type(self, item: Dict[str, Any]) -> str:
+        """KAN-226 GAP B: resolve the content_type to persist for one item.
+
+        The client may omit content_type entirely - the flat preview used to
+        drop the key - so the value is re-derived with the existing EPUB/PDF
+        classifier instead of defaulting to "chapter". A value the client does
+        send is honoured.
+        """
+        VALID_TYPES = ("chapter", "front_matter", "back_matter", "metadata")
+        raw = item.get("content_type")
+        if isinstance(raw, str) and raw.strip().lower() in VALID_TYPES:
+            return raw.strip().lower()
+
+        title = str(item.get("title") or "")
+        content = str(item.get("content") or "")
+        try:
+            derived = self._classify_spine_item(
+                title, "", len(content.split()), content
+            )
+        except Exception:
+            derived = "chapter"
+        return derived if derived in VALID_TYPES else "chapter"
+
+    def _build_flat_preview_chapters(
+        self,
+        all_chapters: List[Dict[str, Any]],
+        book_id_to_update: str,
+    ) -> List[Dict[str, Any]]:
+        """KAN-226 GAP A: build the flat preview chapter list.
+
+        The flat preview used to omit content_type entirely, so the client
+        could not send it back and the save path fell back to "chapter" for
+        every persisted row. Real chapters are numbered 1..N; front/back
+        matter keeps chapter_number null.
+        """
+        formatted_chapters = []
+        chapter_number = 0
+        for i, ch in enumerate(all_chapters):
+            if not isinstance(ch, dict):
+                continue
+
+            content_type = self._resolve_content_type(ch)
+            if content_type == "chapter":
+                chapter_number += 1
+                resolved_number = ch.get("chapter_number", ch.get("number"))
+                # Extraction can carry the number as a string ("1"); the
+                # persisted column is an integer, so coerce defensively.
+                try:
+                    resolved_number = int(resolved_number)
+                except (TypeError, ValueError):
+                    resolved_number = chapter_number
+            else:
+                resolved_number = None
+
+            chapter_data = {
+                "id": f"chapter_{i + 1}",
+                "book_id": book_id_to_update,
+                "chapter_number": resolved_number,
+                "title": ch.get("title", f"Chapter {i + 1}"),
+                "content": ch.get("content", ""),
+                "summary": ch.get("summary", ""),
+                "content_type": content_type,
+                "order_index": i,
+            }
+            formatted_chapters.append(chapter_data)
+        return formatted_chapters
 
     def _iter_confirmed_structure_entries(
         self, confirmed_chapters: List[Dict[str, Any]]
