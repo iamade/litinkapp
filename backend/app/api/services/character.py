@@ -654,7 +654,7 @@ class CharacterService:
             result = await self.session.exec(stmt)
             plot_user_id = result.first()
 
-            if not plot_user_id or str(plot_user_id) != user_id:
+            if not plot_user_id or str(plot_user_id) != str(user_id):
                 raise PermissionDeniedError("Access denied to plot overview")
 
             stmt = select(Character).where(
@@ -828,7 +828,7 @@ class CharacterService:
             result = await self.session.exec(stmt)
             book_user_id = result.first()
 
-            if not book_user_id or str(book_user_id) != user_id:
+            if not book_user_id or str(book_user_id) != str(user_id):
                 raise PermissionDeniedError("Access denied to book")
 
             stmt = select(Character).where(Character.book_id == book_id)
