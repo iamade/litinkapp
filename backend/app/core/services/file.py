@@ -2552,6 +2552,123 @@ class FileService:
 
         return accepted
 
+    def _reconstruct_epub_chapters_from_inline_headings(
+        self, full_text: str
+    ) -> List[Dict[str, Any]]:
+        """KAN-445: recover chapters from INLINE heading placement.
+
+        Scan/page-export EPUBs aggregate running headers and body into single
+        lines, so real headings sit mid-line ("GREAT EXPECTATIONS. CHAPTER I.
+        My father's...") and the line-anchored explicit-sequence recovery
+        finds nothing. Scan ``chapter <num>`` markers anywhere in the text and
+        chain them on the expected sequence, tolerating OCR numeral garble
+        (VL -> V, VIL -> VI, XVIIL -> XVIII) via unit edit distance. This is
+        heading admission, not a gate bypass: each admitted chapter starts at
+        a real heading occurrence and carries the body up to the next one.
+        """
+        if not full_text or not full_text.strip():
+            return []
+
+        marker_re = re.compile(r"(?i)\bchapter\s+([ivxlcdm]+|\d{1,3})\b")
+        matches = list(marker_re.finditer(full_text))
+        if not matches:
+            return []
+
+        def to_roman(value: int) -> str:
+            pairs = [
+                (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
+                (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
+                (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+            ]
+            out = []
+            for arabic, numeral in pairs:
+                while value >= arabic:
+                    out.append(numeral)
+                    value -= arabic
+            return "".join(out)
+
+        def edit_distance_within_one(a: str, b: str) -> bool:
+            if abs(len(a) - len(b)) > 1:
+                return False
+            if len(a) == len(b):
+                return sum(x != y for x, y in zip(a, b)) <= 1
+            if len(a) > len(b):
+                a, b = b, a
+            for i in range(len(b)):
+                if b[:i] + b[i + 1 :] == a:
+                    return True
+            return False
+
+        def marker_value(token: str, expected: int) -> Optional[int]:
+            token = token.strip(".:")
+            if token.isdigit():
+                value = int(token)
+            elif re.fullmatch(r"(?i)[ivxlcdm]+", token):
+                value = self.structure_detector._roman_to_int(token.upper())
+            else:
+                return None
+            if value == expected:
+                return value
+            if not 1 <= expected <= 500:
+                return None
+            # OCR garble tolerance: a garbled numeral's strict parse is wrong
+            # (VL parses as 45), so only unit edit distance against the
+            # EXPECTED numeral admits it (VL~V, VIL~VI, XVIIL~XVIII).
+            if re.fullmatch(r"(?i)[ivxlcdm]+", token) and edit_distance_within_one(
+                token.upper(), to_roman(expected)
+            ):
+                return expected
+            return None
+
+        chain: List[re.Match] = []
+        expected = 1
+        for match in matches:
+            value = marker_value(match.group(1), expected)
+            if value is None:
+                continue
+            chain.append(match)
+            expected += 1
+
+        if len(chain) < 2:
+            return []
+
+        chapters: List[Dict[str, Any]] = []
+        front_content = full_text[: chain[0].start()].strip()
+        if len(front_content) >= 100:
+            chapters.append(
+                self._with_generation_flag(
+                    {
+                        "number": None,
+                        "title": "Front Matter",
+                        "content": front_content,
+                        "type": "front_matter",
+                        "content_type": "front_matter",
+                    }
+                )
+            )
+
+        for index, match in enumerate(chain):
+            end = chain[index + 1].start() if index + 1 < len(chain) else len(full_text)
+            content = full_text[match.start() : end].strip()
+            if len(content) < 100:
+                continue
+            chapters.append(
+                self._with_generation_flag(
+                    {
+                        "number": str(index + 1),
+                        "title": f"Chapter {index + 1}",
+                        "content": content,
+                        "type": "chapter",
+                        "content_type": "chapter",
+                    }
+                )
+            )
+
+        chapter_rows = [c for c in chapters if c.get("content_type") == "chapter"]
+        if len(chapter_rows) < 2:
+            return []
+        return chapters
+
     def _reconstruct_epub_chapters_from_text(
         self, full_text: str, fragment_count: int = 0
     ) -> List[Dict[str, Any]]:
@@ -2581,14 +2698,24 @@ class FileService:
             explicit_reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
             if explicit_reconstructed:
                 reconstructed = explicit_reconstructed
-            elif self._aggregate_reconstruction_represents_document(
-                reconstructed, full_text, fragment_count
-            ):
-                reconstructed = self._accept_representative_epub_reconstruction(
-                    reconstructed
-                )
             else:
-                return []
+                # KAN-445: headings can sit INLINE after running headers in
+                # scan/page-export aggregates; the line-anchored explicit
+                # sequence finds nothing. Try inline heading recovery
+                # before the coverage fallback (admission, not gate bypass).
+                inline_reconstructed = (
+                    self._reconstruct_epub_chapters_from_inline_headings(full_text)
+                )
+                if inline_reconstructed:
+                    reconstructed = inline_reconstructed
+                elif self._aggregate_reconstruction_represents_document(
+                    reconstructed, full_text, fragment_count
+                ):
+                    reconstructed = self._accept_representative_epub_reconstruction(
+                        reconstructed
+                    )
+                else:
+                    return []
 
         semantic_chapters = [
             ch for ch in reconstructed if ch.get("content_type") == "chapter"
