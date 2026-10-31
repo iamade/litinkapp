@@ -654,15 +654,18 @@ class CharacterService:
             result = await self.session.exec(stmt)
             plot_user_id = result.first()
 
-            if not plot_user_id or str(plot_user_id) != str(user_id):
+            # KAN-504: a missing entity is NOT a denial - split the old
+            # conflated check so nonexistent ids surface as 404 and only a
+            # real ownership mismatch is denied.
+            if plot_user_id is None:
+                raise CharacterNotFoundError("Plot overview not found")
+            if str(plot_user_id) != str(user_id):
                 raise PermissionDeniedError("Access denied to plot overview")
 
             stmt = select(Character).where(
                 Character.plot_overview_id == plot_overview_id
             )
             result = await self.session.exec(stmt)
-            characters = result.all()
-
             characters = result.all()
 
             # Collect all character IDs
@@ -705,7 +708,7 @@ class CharacterService:
 
             return results
 
-        except PermissionDeniedError:
+        except (CharacterNotFoundError, PermissionDeniedError):
             raise
         except Exception as e:
             logger.error(
@@ -828,7 +831,11 @@ class CharacterService:
             result = await self.session.exec(stmt)
             book_user_id = result.first()
 
-            if not book_user_id or str(book_user_id) != str(user_id):
+            # KAN-504: same split as the plot site - missing book is 404,
+            # wrong owner is 403, and neither may be swallowed below.
+            if book_user_id is None:
+                raise CharacterNotFoundError("Book not found")
+            if str(book_user_id) != str(user_id):
                 raise PermissionDeniedError("Access denied to book")
 
             stmt = select(Character).where(Character.book_id == book_id)
@@ -836,6 +843,10 @@ class CharacterService:
             characters = result.all()
 
             return [CharacterResponse.model_validate(char) for char in characters]
+        except (CharacterNotFoundError, PermissionDeniedError):
+            # KAN-504: the old bare `except` swallowed the denial and
+            # returned [], so a wrong owner got HTTP 200 with an empty list.
+            raise
         except Exception as e:
             logger.error(
                 f"[CharacterService] Error retrieving all characters for book {book_id}: {str(e)}"

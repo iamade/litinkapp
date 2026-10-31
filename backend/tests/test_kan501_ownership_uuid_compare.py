@@ -535,14 +535,20 @@ async def test_book_path_grants_owner_uuid_owner_id():
 
 
 async def test_book_path_denies_non_owner():
+    # KAN-504: the old bare `except` swallowed the denial and returned [],
+    # so a wrong owner got HTTP 200 with an empty list. The split raises
+    # PermissionDeniedError instead (route-mapped to 403).
+    import pytest as _pytest
+
+    from app.api.services.character import PermissionDeniedError as _PDE
+
     session = _DispatchingSession(
         owner_id=OTHER_ID,
         characters=[_character(user_id=OTHER_ID)],
     )
     service = CharacterService(session)
-    result = await service.get_all_characters_for_book(str(BOOK_ID), OWNER_ID)
-
-    assert result == [], result
+    with _pytest.raises(_PDE):
+        await service.get_all_characters_for_book(str(BOOK_ID), OWNER_ID)
 
 
 # ---------------------------------------------------------------------------

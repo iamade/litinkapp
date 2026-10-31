@@ -16,7 +16,11 @@ from app.plots.schemas import (
     ImageGenerationRequest,
     BatchImageGenerationRequest,
 )
-from app.api.services.character import CharacterService
+from app.api.services.character import (
+    CharacterNotFoundError,
+    CharacterService,
+    PermissionDeniedError,
+)
 from app.api.services.subscription import SubscriptionManager
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
@@ -53,6 +57,12 @@ async def get_character(
 
     except HTTPException:
         raise
+    except CharacterNotFoundError as e:
+        # KAN-504: a missing entity is 404, not a 500 with a denial body.
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionDeniedError as e:
+        # KAN-504: an ownership mismatch is 403, not a 500.
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to retrieve character: {str(e)}"
@@ -82,6 +92,12 @@ async def update_character(
 
     except HTTPException:
         raise
+    except CharacterNotFoundError as e:
+        # KAN-504: a missing entity is 404, not a 500 with a denial body.
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionDeniedError as e:
+        # KAN-504: an ownership mismatch is 403, not a 500.
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to update character: {str(e)}"
@@ -112,6 +128,12 @@ async def delete_character(
 
     except HTTPException:
         raise
+    except CharacterNotFoundError as e:
+        # KAN-504: a missing entity is 404, not a 500 with a denial body.
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionDeniedError as e:
+        # KAN-504: an ownership mismatch is 403, not a 500.
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to delete character: {str(e)}"
@@ -250,6 +272,12 @@ async def create_character(
 
     except HTTPException:
         raise
+    except CharacterNotFoundError as e:
+        # KAN-504: a missing entity is 404, not a 500 with a denial body.
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionDeniedError as e:
+        # KAN-504: an ownership mismatch is 403, not a 500.
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to create character: {str(e)}"
@@ -277,6 +305,12 @@ async def get_characters_by_plot(
 
     except HTTPException:
         raise
+    except CharacterNotFoundError as e:
+        # KAN-504: a missing entity is 404, not a 500 with a denial body.
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionDeniedError as e:
+        # KAN-504: an ownership mismatch is 403, not a 500.
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to retrieve characters: {str(e)}"
