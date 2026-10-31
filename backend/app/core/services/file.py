@@ -3250,6 +3250,13 @@ class FileService:
             # front-matter row persisted as a real chapter and consumed a
             # chapter number.
             "front matter",
+            # KAN-226 part 2: the section-level sets (detect_structure and
+            # the flat extractor) already contain "prologue" while this set -
+            # the one the save loop consults - did not, so the same book
+            # classified prologue as front matter on one path and as a
+            # chapter on another. Ruled in by LC 12:57Z as the same defect
+            # class, not a new product decision.
+            "prologue",
         }
         BACK_MATTER_TITLES = {
             "epilogue", "afterword", "appendix",
