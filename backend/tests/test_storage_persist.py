@@ -44,19 +44,19 @@ def _stream_client(chunks=None, status_error=None, raise_on_enter=None):
 class TestBuildMediaPath:
     def test_image_path(self):
         path = S3StorageService.build_media_path("user-123", "images", "record-456", "png")
-        assert path == "media/user-123/images/record-456.png"
+        assert path == "users/user-123/images/record-456.png"
 
     def test_audio_path(self):
         path = S3StorageService.build_media_path("user-123", "audio", "record-789", "mp3")
-        assert path == "media/user-123/audio/record-789.mp3"
+        assert path == "users/user-123/audio/record-789.mp3"
 
     def test_video_path(self):
         path = S3StorageService.build_media_path("user-123", "video", "record-abc", "mp4")
-        assert path == "media/user-123/video/record-abc.mp4"
+        assert path == "users/user-123/video/record-abc.mp4"
 
     def test_system_user(self):
         path = S3StorageService.build_media_path("system", "images", "rec-1", "png")
-        assert path == "media/system/images/rec-1.png"
+        assert path == "users/system/images/rec-1.png"
 
 
 class TestPersistFromUrl:

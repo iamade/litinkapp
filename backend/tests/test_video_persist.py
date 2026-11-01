@@ -42,7 +42,7 @@ def _stream_client(chunks=None, status_error=None, raise_on_enter=None):
 class TestVideoPersistToS3:
     def test_video_media_path(self):
         path = S3StorageService.build_media_path('user-1', 'video', 'rec-1', 'mp4')
-        assert path == 'media/user-1/video/rec-1.mp4'
+        assert path == 'users/user-1/video/rec-1.mp4'
 
     @pytest.mark.asyncio
     async def test_persist_video_from_url(self):
