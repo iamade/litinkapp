@@ -239,6 +239,34 @@ from app.tasks.video_tasks import (
 )
 
 
+# KAN-509: isolate the provider media-base lookup from the process environment.
+# _provider_media_public_base() checks the typed settings
+# MODELSLAB_MEDIA_PUBLIC_URL and MINIO_PROVIDER_PUBLIC_URL first, then falls
+# back to os.getenv() for the names below. The settings object reads the
+# environment once at import, so a container that sets either one (as the
+# staging API container does) leaks an external base into tests that patch only
+# MINIO_PUBLIC_URL and MINIO_ENDPOINT. Reset both settings and clear the env
+# names before each test; tests that need a base set it through monkeypatch.
+_PROVIDER_MEDIA_ENV_NAMES = (
+    "MODELSLAB_MEDIA_PUBLIC_URL",
+    "MINIO_PROVIDER_PUBLIC_URL",
+    "PUBLIC_MINIO_URL",
+    "MINIO_EXTERNAL_URL",
+    "MEDIA_PUBLIC_URL",
+    "PUBLIC_MEDIA_URL",
+    "S3_PUBLIC_URL",
+    "CDN_BASE_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_provider_media_env(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for name in _PROVIDER_MEDIA_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_kan86_provider_media_url_rejects_localhost_without_external_base(monkeypatch):
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
