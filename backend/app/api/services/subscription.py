@@ -990,7 +990,13 @@ class SubscriptionManager:
             # KAN-314: grant tier credits on subscription activation
             # KAN-503: a tier change adjusts the existing live grant instead
             # of stacking a new one; only the first grant is created.
-            adjusted = await self._adjust_tier_grant(user_id, old_tier, tier)
+            # A brand-new subscription has no prior tier to take a delta from;
+            # the first grant is created below (balance-equivalent to adjusting).
+            adjusted = (
+                await self._adjust_tier_grant(user_id, old_tier, tier)
+                if old_tier is not None
+                else False
+            )
             credit_amount = TIER_CREDIT_GRANTS_BY_ENUM.get(tier.value)
             if not adjusted and credit_amount and credit_amount > 0:
                 grant_type = (
