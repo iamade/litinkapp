@@ -21,8 +21,9 @@ from pathlib import Path
 import pytest
 
 
-CINEMATIC_GATES = Path(
-    "/opt/openclaw/worktrees/cos-finding-d-title-default/backend/app/api/routes/ai/cinematic_gates.py"
+# Derived from this file's own location (backend/tests/<file>), not a fixed worktree path.
+CINEMATIC_GATES = (
+    Path(__file__).resolve().parents[1] / "app" / "api" / "routes" / "ai" / "cinematic_gates.py"
 )
 
 

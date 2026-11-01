@@ -24,7 +24,8 @@ from pathlib import Path
 import pytest
 
 
-WORKTREE = Path("/opt/openclaw/worktrees/cos-kan458-scene-unit-type")
+# Repo root derived from this file's own location (repo/backend/tests/<file>), not a fixed worktree path.
+WORKTREE = Path(__file__).resolve().parents[2]
 MODELS_PY = WORKTREE / "backend/app/videos/models.py"
 SERVICE_PY = WORKTREE / "backend/app/core/services/cinematic_episode_gate_service.py"
 ROUTES_PY = WORKTREE / "backend/app/api/routes/ai/cinematic_gates.py"
