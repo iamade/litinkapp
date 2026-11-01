@@ -13,6 +13,19 @@ FIXTURE_DIR = Path("/opt/openclaw/fixtures/litinkai/KAN-440-444")
 ORWELL_PDF = FIXTURE_DIR / "orwell1984.pdf"
 FRANK_PDF = FIXTURE_DIR / "frank-a5.pdf"
 
+# KAN-509: the exact-PDF fixtures live only on the host that holds the PSQ gate
+# files; they are not tracked in the repo and are absent from the staging API
+# container. Tests that read them are skipped, with this reason, when the files
+# are missing. A skip is not a pass: the pass evidence is a run on a host that
+# has the PDFs.
+requires_exact_pdfs = pytest.mark.skipif(
+    not (ORWELL_PDF.is_file() and FRANK_PDF.is_file()),
+    reason=(
+        "exact PSQ fixture PDFs not present at "
+        f"{FIXTURE_DIR} (orwell1984.pdf, frank-a5.pdf); run on a host that has them"
+    ),
+)
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -28,6 +41,7 @@ def _detect_quietly(service: FileService, text: str) -> dict:
         return service.structure_detector.detect_structure(text)
 
 
+@requires_exact_pdfs
 def test_exact_fixture_checksums_are_the_psq_gate_files():
     assert _sha256(ORWELL_PDF) == (
         "6067532ebccc52462efd067f8983785cd6c3c1b07259180963863ca51383cb42"
@@ -37,6 +51,7 @@ def test_exact_fixture_checksums_are_the_psq_gate_files():
     )
 
 
+@requires_exact_pdfs
 def test_orwell_exact_pdf_preserves_front_body_parts_and_appendix():
     service = FileService()
     result = _detect_quietly(service, _pdf_text(ORWELL_PDF))
@@ -67,6 +82,7 @@ def test_orwell_exact_pdf_preserves_front_body_parts_and_appendix():
     assert not any("content with negative obedience" in title for title in titles)
 
 
+@requires_exact_pdfs
 def test_frank_exact_pdf_rejects_gappy_page_number_direct_detection():
     service = FileService()
     lines = _pdf_text(FRANK_PDF).split("\n")
@@ -77,6 +93,7 @@ def test_frank_exact_pdf_rejects_gappy_page_number_direct_detection():
     assert direct_headers == []
 
 
+@requires_exact_pdfs
 def test_frank_exact_pdf_bookmarks_preserve_volume_hierarchy_for_save():
     service = FileService()
     doc = fitz.open(FRANK_PDF)
