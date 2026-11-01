@@ -31,6 +31,9 @@ class _Result:
     def first(self):
         return self._first
 
+    def all(self):
+        return [] if self._first is None else [self._first]
+
 
 class _FakeSession:
     def __init__(self, *results):
@@ -40,6 +43,9 @@ class _FakeSession:
         self.refreshes = []
 
     async def exec(self, statement):
+        # KAN-503: tier grants are queried on cancel; no live grants in these fixtures.
+        if "credit_grants" in str(statement).lower():
+            return _Result(None)
         assert self.results, f"unexpected query: {statement}"
         return _Result(self.results.pop(0))
 
