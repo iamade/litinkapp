@@ -18,8 +18,9 @@ from pathlib import Path
 import pytest
 
 
-SCHEMA_PATH = Path(
-    "/opt/openclaw/worktrees/cos-kan452-uuid-response-sweep/backend/app/api/routes/ai/cinematic_gates.py"
+# Derived from this file's own location (backend/tests/<file>), not a fixed worktree path.
+SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1] / "app" / "api" / "routes" / "ai" / "cinematic_gates.py"
 )
 
 
