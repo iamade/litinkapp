@@ -526,4 +526,3 @@ docker compose -f backend/local.yml down
 | `scripts/start-dev.sh` | Start dev environment |
 | `scripts/env.staging` | Staging env vars |
 | `scripts/env.dev` | Dev env vars |
-| `backend/local-tunnel.yml` | Docker override (uses tunneled services) |
