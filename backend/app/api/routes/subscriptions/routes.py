@@ -22,6 +22,7 @@ from app.api.services.subscription import SubscriptionManager, SubscriptionTier
 from app.core.services.stripe import stripe_service
 from app.core.config import settings
 from app.credits.service import CreditService
+from app.credits.constants import TIER_CREDIT_GRANTS_BY_ENUM
 from app.auth.models import User
 
 router = APIRouter()
@@ -208,6 +209,8 @@ async def get_subscription_tiers(session: AsyncSession = Depends(get_session)):
                 ),
                 "description": tier_info.get("description", ""),
                 "monthly_price": tier_info.get("monthly_price", 0),
+                # KAN-310: credit count comes from app/credits/constants.py
+                "monthly_credits": TIER_CREDIT_GRANTS_BY_ENUM.get(tier_info["tier"]),
                 "monthly_video_limit": "unlimited",
                 "video_quality": tier_info.get(
                     "video_quality", features.get("max_resolution", "720p")

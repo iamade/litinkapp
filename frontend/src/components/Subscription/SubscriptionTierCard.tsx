@@ -35,15 +35,26 @@ interface SubscriptionTierCardProps {
   compact?: boolean;
 }
 
-// Credit estimates per tier (matches backend configurations & pricing strategy)
-const TIER_CREDITS: Record<string, { label: string; amount: string }> = {
-  free: { label: "Credits included", amount: "300" },
-  basic: { label: "Credits/month", amount: "1,500" },
-  standard: { label: "Credits/month", amount: "4,800" },
-  pro: { label: "Credits/month", amount: "4,800" },
-  premium: { label: "Credits/month", amount: "13,100" },
-  professional: { label: "Credits/month", amount: "33,100" },
-  enterprise: { label: "Credits", amount: "Unlimited" },
+// KAN-310: credit counts are served by the backend from app/credits/constants.py.
+// There is deliberately no hardcoded tier->credits map here. A regression test fails
+// if the card and the backend constants ever disagree:
+//   backend/tests/test_kan310_credit_map_from_constants.py
+//   frontend/src/components/Subscription/SubscriptionTierCard.test.tsx
+const formatCredits = (amount: number): string => amount.toLocaleString("en-US");
+
+const getTierCredits = (tier: SubscriptionTier): { label: string; amount: string } => {
+  if (typeof tier.monthly_credits === "number") {
+    return {
+      label: tier.tier === "free" ? "Credits included" : "Credits/month",
+      amount: formatCredits(tier.monthly_credits),
+    };
+  }
+  if (tier.tier === "enterprise") {
+    // Enterprise has no monthly credit grant in the backend constants.
+    return { label: "Credits", amount: "Unlimited" };
+  }
+  // The backend served no credit count for this tier: show nothing rather than guess.
+  return { label: "Credits", amount: "—" };
 };
 
 const getAnnualPrice = (tierName: string): number => {
@@ -84,7 +95,7 @@ export default function SubscriptionTierCard({
   const displayPrice = billingPeriod === "monthly" ? tier.monthly_price : annualPrice;
   const periodLabel = billingPeriod === "monthly" ? "/mo" : "/yr";
 
-  const credits = TIER_CREDITS[tier.tier] || { label: "Credits", amount: "—" };
+  const credits = getTierCredits(tier);
 
   const getTierColor = (tierName: string) => {
     switch (tierName) {
