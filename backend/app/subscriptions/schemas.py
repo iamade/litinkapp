@@ -29,6 +29,7 @@ class SubscriptionTierInfo(BaseModel):
     display_name: str
     description: Optional[str] = None
     monthly_price: float
+    monthly_credits: Optional[int] = None  # KAN-310: served from app/credits/constants.py
     stripe_price_id: Optional[str] = None
     stripe_product_id: Optional[str] = None
     monthly_video_limit: Union[int, str] = "unlimited"  # DEPRECATED: credit-only migration (KAN-265)

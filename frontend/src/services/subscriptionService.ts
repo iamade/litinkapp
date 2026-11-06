@@ -5,6 +5,7 @@ export interface SubscriptionTier {
   display_name: string;
   description?: string;
   monthly_price: number;
+  monthly_credits?: number | null;  // KAN-310: served from backend constants
   stripe_price_id?: string;
   stripe_product_id?: string;
   monthly_video_limit: number | "unlimited";  // DEPRECATED: credit-only (KAN-265)
