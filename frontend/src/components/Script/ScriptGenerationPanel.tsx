@@ -5,7 +5,7 @@ import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
 import { apiClient } from '../../lib/api';
 import ExpandScriptModal from './ExpandScriptModal';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
-import { estimateScriptCredits } from '../../lib/creditCosts';
+import { CREDIT_COSTS } from '../../lib/creditCosts';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 import { toast } from 'react-hot-toast';
 import ProtectedImage from '../Common/ProtectedImage';
@@ -231,7 +231,12 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [newCharacterName, setNewCharacterName] = useState('');
   const [newEntityType, setNewEntityType] = useState<'character' | 'object' | 'location' | ''>('');
   const { balance: creditBalance } = useCreditBalance({ enabled: true });
-  const scriptCreditCost = estimateScriptCredits();
+  // KAN-521: the label must equal the ledger debit. The backend charges a flat
+  // SCRIPT_GEN = 2 credits per generation (backend/app/credits/constants.py), reserved
+  // and committed without token scaling. The previous estimateScriptCredits() call
+  // returned the book-pipeline per-1k-token rate (3), which has no charge path for this
+  // endpoint, so the UI over-stated the price by one credit.
+  const scriptCreditCost = CREDIT_COSTS.SCRIPT;
   const hasScriptCredits = creditBalance >= scriptCreditCost;
 
   // KAN-331: Auto-link script character pills to Plot Overview characters on exact name match.
