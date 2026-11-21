@@ -36,7 +36,16 @@ async def test_generate_script_emits_structured_resolution_telemetry(
     assert result["telemetry"]["request_id"] == "request-123"
     assert result["telemetry"]["user_id"] == "user-456"
     assert result["telemetry"]["resolved_model"] == "zai/glm-5.2"
-    assert result["telemetry"]["ladder"][0] == "zai/glm-5.2"
-    assert len(result["telemetry"]["ladder"]) == 9
+    # KAN-480: telemetry must retain the complete configured order.
+    assert result["telemetry"]["ladder"] == [
+        "ollama/gemma4:31b",
+        "piapi/gpt-4o-mini",
+        "google/gemini-2.5-flash",
+        "openai/gpt-5-mini",
+        "anthropic/claude-haiku-4-5-20251001",
+        "minimax/MiniMax-M2",
+        "zai/glm-5.2",
+        "zai/glm-5.1",
+    ]
     assert result["telemetry"]["success"] is True
     assert "[ScriptModelRouter] telemetry" in caplog.text
