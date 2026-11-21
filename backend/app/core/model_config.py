@@ -64,7 +64,8 @@ class ModelConfig:
             if model
         ]
 
-# Script ladders are cheapest-to-most-expensive and capped at two Ollama slots.
+# Script ladders prefer the existing Ollama route; Z.ai is a later fallback.
+# Featherless is excluded. A second account requires separate eligibility review.
 # Token prices below are standard USD per 1M input/output tokens as of 2026-07-12.
 # Subscription/proxy slots need their effective dashboard rate in the COGS audit.
 #
@@ -89,89 +90,73 @@ class ModelConfig:
 # ============================================================================
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="zai/glm-5.2",  # $1.40/$4.40
-        fallback="ollama/gemma4:31b",  # plan-bundled; Ollama slot 1/1
-        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
-        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
-        fallback4="google/gemini-2.5-flash",  # $0.30/$2.50
-        fallback5="openai/gpt-5-mini",  # legacy ID: rate confirmation required
-        fallback6="anthropic/claude-haiku-4-5-20251001",  # $1/$5
-        fallback7="zai/glm-5.1",  # $1.40/$4.40
-        # --- KAN-450: MiniMax model family (additional fallbacks) ---
-        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
-        fallback8="minimax/MiniMax-M2",  # Legacy agentic: 200k ctx, 128k max output. Last-resort fallback.
+        primary='ollama/gemma4:31b',
+        fallback='piapi/gpt-4o-mini',
+        fallback2='google/gemini-2.5-flash',
+        fallback3='openai/gpt-5-mini',
+        fallback4='anthropic/claude-haiku-4-5-20251001',
+        fallback5='minimax/MiniMax-M2',
+        fallback6='zai/glm-5.2',
+        fallback7='zai/glm-5.1',
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
         cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="zai/glm-5.2",  # $1.40/$4.40
-        fallback="ollama/deepseek-v4-pro:cloud",  # plan-bundled; Ollama slot 1/1
-        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
-        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
-        fallback4="google/gemini-2.5-flash",  # $0.30/$2.50
-        fallback5="openai/gpt-5-mini",  # legacy ID: rate confirmation required
-        fallback6="anthropic/claude-haiku-4-5-20251001",  # $1/$5
-        fallback7="anthropic/claude-sonnet-4-6",  # $3/$15
-        # --- KAN-450: MiniMax model family (additional fallbacks) ---
-        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
-        fallback8="minimax/MiniMax-M2.5",  # Legacy value: code gen/refactoring. "Peak Performance. Ultimate Value."
-        fallback9="minimax/MiniMax-M2.1",  # 230B total / 10B activated. Enhanced reasoning, code gen.
+        primary='ollama/deepseek-v4-pro:cloud',
+        fallback='piapi/gpt-4o-mini',
+        fallback2='google/gemini-2.5-flash',
+        fallback3='openai/gpt-5-mini',
+        fallback4='anthropic/claude-haiku-4-5-20251001',
+        fallback5='anthropic/claude-sonnet-4-6',
+        fallback6='minimax/MiniMax-M2.5',
+        fallback7='minimax/MiniMax-M2.1',
+        fallback8='zai/glm-5.2',
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
         cost_per_1k_output=0.00028,
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="zai/glm-5.1",  # $1.40/$4.40
-        fallback="zai/glm-5.2",  # $1.40/$4.40
-        fallback2="featherless/zai-org/GLM-5.1-FP8",  # subscription-gated
-        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
-        fallback4="google/gemini-2.5-pro",  # $1.25/$10 (<=200k prompt)
-        fallback5="openai/gpt-5.4",  # $2.50/$15 (short context)
-        fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
-        fallback7="anthropic/claude-opus-4-6",  # $5/$25
-        # --- KAN-450: MiniMax model family (additional fallbacks) ---
-        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
-        # NOTE: MiniMax-M2.7-highspeed requires masked-probe pattern: probe the model with a
-        # masked/redacted input before full generation to verify availability and avoid
-        # wasting credits on unavailable instances. See KAN-450 acceptance criteria #3.
-        fallback8="minimax/MiniMax-M2.7-highspeed",  # Fast M2.7 inference, low latency. Masked-probe required.
+        primary='ollama/deepseek-v4-pro:cloud',
+        fallback='piapi/gpt-4o-mini',
+        fallback2='google/gemini-2.5-pro',
+        fallback3='openai/gpt-5.4',
+        fallback4='anthropic/claude-sonnet-4-6',
+        fallback5='anthropic/claude-opus-4-6',
+        fallback6='minimax/MiniMax-M2.7-highspeed',
+        fallback7='zai/glm-5.1',
+        fallback8='zai/glm-5.2',
         max_tokens=8000,
         temperature=0.7,
         cost_per_1k_input=0.00025,
         cost_per_1k_output=0.00125,
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="zai/glm-5.2",  # $1.40/$4.40
-        fallback="ollama/kimi-k2.6:cloud",  # plan-bundled; Ollama slot 1/1
-        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
-        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
-        fallback4="google/gemini-3.1-pro-preview",  # $2/$12 (<=200k prompt)
-        fallback5="openai/gpt-5.4",  # $2.50/$15 (short context)
-        fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
-        fallback7="anthropic/claude-opus-4-6",  # $5/$25
-        # --- KAN-450: MiniMax model family (additional fallbacks) ---
-        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
-        fallback8="minimax/MiniMax-M2.7",  # Top real-world engineering, character-rich interaction.
+        primary='ollama/kimi-k2.6:cloud',
+        fallback='piapi/gpt-4o-mini',
+        fallback2='google/gemini-3.1-pro-preview',
+        fallback3='openai/gpt-5.4',
+        fallback4='anthropic/claude-sonnet-4-6',
+        fallback5='anthropic/claude-opus-4-6',
+        fallback6='minimax/MiniMax-M2.7',
+        fallback7='zai/glm-5.2',
         max_tokens=8000,
         temperature=0.75,
         cost_per_1k_input=0.00150,
         cost_per_1k_output=0.00600,
     ),
     ModelTier.PRO: ModelConfig(
-        primary="openai/gpt-5.5",  # $5/$30 (short context)
-        fallback="zai/glm-5.2",  # $1.40/$4.40
-        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
-        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
-        fallback4="google/gemini-3.1-pro-preview",  # $2/$12 (<=200k prompt)
-        fallback5="openai/gpt-5.4-pro",  # $30/$180 (short context)
-        fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
-        fallback7="anthropic/claude-opus-4-6",  # $5/$25
-        # --- KAN-450: MiniMax model family (additional fallbacks) ---
-        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
-        fallback8="minimax/MiniMax-M3",  # Frontier multimodal coding model, 1M context window.
+        primary='ollama/kimi-k2.6:cloud',
+        fallback='openai/gpt-5.5',
+        fallback2='piapi/gpt-4o-mini',
+        fallback3='google/gemini-3.1-pro-preview',
+        fallback4='openai/gpt-5.4-pro',
+        fallback5='anthropic/claude-sonnet-4-6',
+        fallback6='anthropic/claude-opus-4-6',
+        fallback7='minimax/MiniMax-M3',
+        fallback8='zai/glm-5.2',
         max_tokens=16000,
         temperature=0.8,
         cost_per_1k_input=0.00250,

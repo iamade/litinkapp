@@ -2,17 +2,17 @@ from app.core.model_config import ModelTier, SCRIPT_MODEL_CONFIG, get_model_conf
 
 
 def test_standard_script_ladder_order():
-    # KAN-450: MiniMax-M2.7-highspeed appended as fallback
+    # KAN-480: pin the complete Ollama-first ladder, including ZAI tail order.
     assert SCRIPT_MODEL_CONFIG[ModelTier.STANDARD].models == [
-        "zai/glm-5.1",
-        "zai/glm-5.2",
-        "featherless/zai-org/GLM-5.1-FP8",
+        "ollama/deepseek-v4-pro:cloud",
         "piapi/gpt-4o-mini",
         "google/gemini-2.5-pro",
         "openai/gpt-5.4",
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-opus-4-6",
         "minimax/MiniMax-M2.7-highspeed",
+        "zai/glm-5.1",
+        "zai/glm-5.2",
     ]
 
 
