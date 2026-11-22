@@ -504,6 +504,55 @@ class SubscriptionManager:
             "current_period_end": cancel_result.get("current_period_end"),
         }
 
+    @staticmethod
+    def _subscription_event_price_id(subscription_data: Dict[str, Any]) -> Optional[str]:
+        """Read a single subscription price without making a Stripe API call."""
+        price_id = subscription_data.get("price_id")
+        if isinstance(price_id, str) and price_id:
+            return price_id
+        items = subscription_data.get("items") or {}
+        entries = items.get("data", []) if isinstance(items, dict) else []
+        # Do not guess which product owns the tier on a multi-item subscription.
+        if (
+            not isinstance(entries, list)
+            or len(entries) != 1
+            or not isinstance(entries[0], dict)
+        ):
+            return None
+        price = entries[0].get("price")
+        if isinstance(price, dict):
+            price = price.get("id")
+        return price if isinstance(price, str) and price else None
+
+    @staticmethod
+    def _tier_for_configured_stripe_price(
+        price_id: str, current_tier: SubscriptionTier
+    ) -> Optional[SubscriptionTier]:
+        """Reverse configured paid price IDs; never infer a tier from metadata.
+
+        Include all configured periods and the legacy single-price settings,
+        even when a period-specific setting overrides checkout's fallback.
+        Keep legacy ``pro`` rows as-is for Standard prices: their backfill is
+        a separate policy, and both already use the same grant amount.
+        """
+        matches = set()
+        for tier in SubscriptionTier:
+            if tier == SubscriptionTier.FREE:
+                continue
+            for suffix in ("PRICE_ID", "MONTHLY_PRICE_ID", "ANNUAL_PRICE_ID"):
+                configured = getattr(
+                    settings, f"STRIPE_{tier.value.upper()}_{suffix}", None
+                )
+                if configured and configured == price_id:
+                    matches.add(tier)
+        standard_aliases = {SubscriptionTier.PRO, SubscriptionTier.STANDARD}
+        if current_tier in standard_aliases and matches and matches <= standard_aliases:
+            return current_tier
+        if len(matches) == 1:
+            return matches.pop()
+        # Missing or conflicting configuration must not change a tier/balance.
+        return None
+
     async def sync_subscription_from_stripe_event(
         self, event_type: str, subscription_data: Dict[str, Any]
     ) -> None:
@@ -553,8 +602,24 @@ class SubscriptionManager:
             subscription.current_period_end = self._stripe_ts_to_datetime(
                 subscription_data.get("current_period_end")
             )
-        if subscription_data.get("price_id"):
-            subscription.stripe_price_id = subscription_data.get("price_id")
+        price_id = self._subscription_event_price_id(subscription_data)
+        if price_id:
+            subscription.stripe_price_id = price_id
+        if (
+            event_type in {"subscription.updated", "customer.subscription.updated"}
+            and price_id
+        ):
+            tier = self._tier_for_configured_stripe_price(price_id, subscription.tier)
+            if tier is not None and tier != subscription.tier:
+                # Reuse checkout's spent-credit-preserving delta adjustment.
+                # An update is not a purchase/backfill: never create a grant.
+                await self._adjust_tier_grant(
+                    subscription.user_id, subscription.tier, tier
+                )
+                subscription.tier = tier
+                tier_limits = self.TIER_LIMITS[tier]
+                subscription.video_quality = tier_limits.get("max_resolution", "720p")
+                subscription.has_watermark = tier_limits.get("watermark", False)
         if event_type in {"subscription.deleted", "customer.subscription.deleted"}:
             subscription.status = SubscriptionStatus.CANCELLED
             subscription.tier = SubscriptionTier.FREE
