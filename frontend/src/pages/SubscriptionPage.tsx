@@ -29,6 +29,12 @@ export default function SubscriptionPage() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
+  const tierDisplayName = (tierName: SubscriptionTier["tier"]) => {
+    // Legacy pro subscriptions use the Standard catalogue entry.
+    const catalogueTier = tierName === "pro" ? "standard" : tierName;
+    return tiers.find((tier) => tier.tier === catalogueTier)?.display_name || tierName;
+  };
+
   const formatDate = (value?: string | null) => {
     if (!value) return null;
     return new Date(value).toLocaleDateString();
@@ -227,13 +233,13 @@ export default function SubscriptionPage() {
                   <div>
                     <span className="text-sm text-gray-600 dark:text-gray-400">Plan</span>
                     <p className="font-semibold text-gray-900 dark:text-white capitalize">
-                      {currentSubscription.plan || currentSubscription.tier}
+                      {tierDisplayName(currentSubscription.plan || currentSubscription.tier)}
                     </p>
                   </div>
                   <div>
                     <span className="text-sm text-gray-600 dark:text-gray-400">Tier</span>
                     <p className="font-semibold text-gray-900 dark:text-white capitalize">
-                      {currentSubscription.tier}
+                      {tierDisplayName(currentSubscription.tier)}
                     </p>
                   </div>
                   <div>
