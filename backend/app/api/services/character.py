@@ -663,8 +663,6 @@ class CharacterService:
             result = await self.session.exec(stmt)
             characters = result.all()
 
-            characters = result.all()
-
             # Collect all character IDs
             char_ids = [str(char.id) for char in characters]
 
