@@ -254,14 +254,15 @@ class StripeService:
 
     async def _handle_subscription_updated(self, subscription: Any) -> Dict[str, Any]:
         """Handle subscription updated event"""
+        # StripeObject inherits dict: attribute .items is the mapping method.
+        items_data = (subscription.get("items") or {}).get("data") or []
+        price = (items_data[0].get("price") or {}) if items_data else {}
         return {
             "event_type": "subscription.updated",
             "subscription_id": subscription.id,
             "customer_id": subscription.customer,
             "status": subscription.status,
-            "price_id": (
-                subscription.items.data[0].price.id if subscription.items.data else None
-            ),
+            "price_id": price.get("id"),
             "current_period_start": subscription.current_period_start,
             "current_period_end": subscription.current_period_end,
             "cancel_at_period_end": subscription.cancel_at_period_end,
